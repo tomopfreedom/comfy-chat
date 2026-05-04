@@ -14,6 +14,10 @@
 - **サーバー側衣装タグ補完** — LLM が衣装タグを一部省略した場合もサーバーが全タグを補完
 - **Hires fix** — RealESRGAN 4x+ Anime 6B で 4x アップスケール後 2x に縮小して再サンプリング（denoise 0.45）
 - **ADetailer** — 顔（`face_yolov8n.pt`）と手（`hand_yolov8n.pt`）を YOLO で検出し、各領域を個別に再 inpaint
+- **img2img** — 参照画像をドラッグ&ドロップしてアップロード、変化量スライダーで忠実度を調整
+- **インペイント** — Canvas ブラシでマスクを描き、塗った範囲だけを再生成
+- **お気に入り** — チャット入力・モデル・解像度・Steps・CFG などの設定セットを名前付きで保存し復元
+- **フレーズサジェスト** — 構図/ライティング/雰囲気/場所/スタイル 5カテゴリのフレーズチップをクリックして追記、最近の入力も再利用可能
 
 ## 依存サービス
 
@@ -50,7 +54,7 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 
 ## 使い方
 
-### 画像生成
+### 画像生成（テキスト → 画像）
 
 1. ヘッダーのセレクターでチェックポイントモデル・解像度・Steps・CFG を設定
 2. 必要に応じて **Hires fix**（高解像度化）・**ADetail**（顔・手修正）をチェック
@@ -61,6 +65,32 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 |----------------|------|-------------|
 | Hires fix | 生成後に 2x 高解像度化 | +50〜100% |
 | ADetail | 顔・手を個別に再描画 | +30〜60% |
+
+### img2img（参照画像から生成）
+
+1. 入力欄上部の「📎 参照画像」エリアに画像をドラッグ&ドロップ（またはクリックして選択）
+2. **変化量** スライダーで参照画像への忠実度を調整（低い値 = 元画像に近い、高い値 = 大きく変化）
+3. テキスト入力で変更指示を書いて生成
+
+### インペイント（部分再生成）
+
+1. img2img と同様に参照画像をアップロード
+2. 「✏️ マスク」ボタンをクリックしてマスクエディタを開く
+3. 再生成したい部分をブラシで塗る（消しゴムモード・ブラシサイズ調整可）
+4. 「確定」でマスクを適用（ボタンが緑色に変わる）
+5. テキストで指示を書いて生成 — マスク範囲のみが再描画される
+
+### お気に入り
+
+- 「⭐ お気に入り」ボタン → 名前を入力して「★ 保存」で現在の入力・設定を記録
+- 保存済みの項目をクリックするとチャット入力・モデル・全パラメータが復元される
+- 設定はブラウザの localStorage に保存されるためリロード後も維持される
+
+### フレーズサジェスト
+
+- 入力欄上部の構図・ライティング・雰囲気・場所・スタイル タブからフレーズチップをクリック
+- 選んだフレーズが「、フレーズ」の形でテキストエリアに追記される
+- 「最近」タブには過去の生成入力が記録され、クリックでテキストエリアに再現できる
 
 ### LoRA の登録
 
@@ -142,8 +172,14 @@ comfy-chat/
 |-----------|--------|------|------|
 | 1 | CheckpointLoaderSimple | モデルロード | 常時 |
 | 20 | CLIPSetLastLayer | CLIP Skip 2 | 常時 |
-| 2-7 | EmptyLatentImage → VAEDecode | 基本生成パイプライン | 常時 |
+| 2 | EmptyLatentImage | テキスト生成用 latent | txt2img 時 |
+| 3〜7 | VAELoader → KSampler → VAEDecode | 基本生成パイプライン | 常時 |
 | 8 | SaveImage | 保存 | 常時（入力元が変わる） |
+| 30 | LoadImage | 参照画像ロード | img2img / インペイント時 |
+| 31 | VAEEncode | 参照画像を latent 化 | img2img（マスクなし）時 |
+| 32 | LoadImage | マスク画像ロード | インペイント時 |
+| 33 | ImageToMask | グレースケール → マスクテンソル変換 | インペイント時 |
+| 34 | VAEEncodeForInpaint | マスク付き latent 化（grow_mask_by=6） | インペイント時 |
 | 100〜 | LoraLoader | LoRA チェーン | LoRA 使用時 |
 | 9〜14 | Upscale → KSampler → VAEDecode | Hires fix | Hires fix ON 時 |
 | 200〜201 | UltralyticsDetectorProvider + FaceDetailer | 顔修正 | ADetail ON 時 |
@@ -158,6 +194,7 @@ comfy-chat/
 | `POST` | `/api/generate` | 画像生成（LLM 変換 → ComfyUI 送信） |
 | `GET` | `/api/image` | ComfyUI `/view` へのプロキシ |
 | `GET` | `/api/health` | LLM・ComfyUI の死活確認 |
+| `POST` | `/api/upload` | 参照画像・マスク画像を ComfyUI にアップロード |
 | `GET` | `/api/loras` | 登録済み LoRA 一覧 |
 | `POST` | `/api/loras` | LoRA 登録 |
 | `DELETE` | `/api/loras/{filename}` | LoRA 削除 |
@@ -176,11 +213,14 @@ comfy-chat/
   "cfg": 7.0,
   "seed": -1,
   "hires_fix": false,
-  "adetail": false
+  "adetail": false,
+  "init_image": null,
+  "mask_image": null,
+  "denoise": 0.75
 }
 ```
 
-`seed: -1` でランダムシード。レスポンスに使用された実際の seed 値が含まれる。
+`seed: -1` でランダムシード。レスポンスに使用された実際の seed 値が含まれる。`init_image` / `mask_image` は `/api/upload` が返すファイル名を指定する。`mask_image` を指定した場合は img2img ではなくインペイントワークフローが使用される。`denoise` は `init_image` 指定時のみ有効（`mask_image` あり時も同様）。
 
 ### POST /api/loras リクエスト形式
 
