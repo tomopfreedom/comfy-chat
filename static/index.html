@@ -352,6 +352,64 @@
     }
     .fav-del:hover { color: #cc5555; }
     #fav-empty { color: #3a3a5a; font-size: 0.8rem; }
+
+    /* ── img2img エリア ──────────────────────────── */
+    #img2img-area {
+      border: 1px dashed #2a2a4a;
+      border-radius: 6px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      transition: border-color 0.15s, background 0.15s;
+      flex-shrink: 0;
+    }
+    #img2img-area.drag-over { border-color: #5555cc; background: #12122a; }
+
+    #img2img-drop {
+      cursor: pointer;
+      color: #4a4a6a;
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      user-select: none;
+    }
+    #img2img-drop:hover { color: #7777aa; }
+
+    #img2img-preview {
+      display: none;
+      align-items: center;
+      gap: 8px;
+    }
+    #img2img-thumb {
+      width: 40px; height: 40px;
+      object-fit: cover; border-radius: 3px;
+      border: 1px solid #2a2a4a; flex-shrink: 0;
+    }
+    #img2img-name {
+      font-size: 0.72rem; color: #8888cc;
+      flex: 1; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    #img2img-clear {
+      background: none; border: none;
+      color: #663333; cursor: pointer;
+      font-size: 0.8rem; padding: 0 2px; line-height: 1;
+    }
+    #img2img-clear:hover { color: #cc5555; }
+
+    #img2img-denoise {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: #666;
+    }
+    #denoise-slider {
+      flex: 1; accent-color: #5555cc; height: 14px; cursor: pointer;
+    }
+    #denoise-val { font-family: monospace; color: #8888cc; min-width: 28px; text-align: right; }
   </style>
 </head>
 <body>
@@ -449,6 +507,24 @@
     </div>
 
     <div id="input-area">
+      <!-- img2img 参照画像（省略可） -->
+      <div id="img2img-area">
+        <div id="img2img-drop">
+          <span>📎</span>
+          <span>参照画像（ドラッグ&ドロップ またはクリック）</span>
+          <input type="file" id="img2img-input" accept="image/*" style="display:none">
+        </div>
+        <div id="img2img-preview">
+          <img id="img2img-thumb" alt="">
+          <span id="img2img-name"></span>
+          <button id="img2img-clear" title="クリア">✕</button>
+        </div>
+        <div id="img2img-denoise">
+          <span>変化量</span>
+          <input type="range" id="denoise-slider" min="0.1" max="1.0" step="0.05" value="0.75">
+          <span id="denoise-val">0.75</span>
+        </div>
+      </div>
       <textarea id="user-input"
         placeholder="例：青空の下でコーヒーを飲む猫、アニメ風..."></textarea>
       <div id="input-controls">
@@ -711,6 +787,8 @@
       seed:       parseInt($("seed-input").value) || -1,
       hires_fix:  $("hires-fix").checked,
       adetail:    $("adetail").checked,
+      init_image: uploadedImageName || null,
+      denoise:    uploadedImageName ? parseFloat($("denoise-slider").value) : 1.0,
     };
 
     try {
@@ -838,6 +916,63 @@
   $("fav-name-inp").addEventListener("keydown", e => {
     if (e.key === "Enter") saveCurrentAsFavorite();
   });
+
+  // ── img2img ─────────────────────────────────────────────────────
+  let uploadedImageName = null;
+
+  $("img2img-drop").addEventListener("click", () => $("img2img-input").click());
+  $("img2img-input").addEventListener("change", e => {
+    if (e.target.files[0]) handleImageFile(e.target.files[0]);
+  });
+
+  const img2imgArea = $("img2img-area");
+  img2imgArea.addEventListener("dragover", e => {
+    e.preventDefault();
+    img2imgArea.classList.add("drag-over");
+  });
+  img2imgArea.addEventListener("dragleave", e => {
+    if (!img2imgArea.contains(e.relatedTarget)) img2imgArea.classList.remove("drag-over");
+  });
+  img2imgArea.addEventListener("drop", e => {
+    e.preventDefault();
+    img2imgArea.classList.remove("drag-over");
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) handleImageFile(file);
+  });
+
+  $("img2img-clear").addEventListener("click", clearImg2img);
+  $("denoise-slider").addEventListener("input", () => {
+    $("denoise-val").textContent = $("denoise-slider").value;
+  });
+
+  async function handleImageFile(file) {
+    const form = new FormData();
+    form.append("image", file);
+    try {
+      const d = await fetch("/api/upload", {method: "POST", body: form}).then(r => r.json());
+      if (!d.ok) { alert("アップロード失敗: " + (d.error || "不明")); return; }
+      uploadedImageName = d.filename;
+      const reader = new FileReader();
+      reader.onload = ev => { $("img2img-thumb").src = ev.target.result; };
+      reader.readAsDataURL(file);
+      $("img2img-name").textContent = file.name;
+      $("img2img-drop").style.display = "none";
+      $("img2img-preview").style.display = "flex";
+      $("img2img-denoise").style.display = "flex";
+    } catch (e) {
+      alert("アップロードエラー: " + e.message);
+    }
+  }
+
+  function clearImg2img() {
+    uploadedImageName = null;
+    $("img2img-input").value = "";
+    $("img2img-thumb").src = "";
+    $("img2img-name").textContent = "";
+    $("img2img-drop").style.display = "";
+    $("img2img-preview").style.display = "none";
+    $("img2img-denoise").style.display = "none";
+  }
 </script>
 </body>
 </html>

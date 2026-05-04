@@ -96,7 +96,9 @@ def _build_workflow(positive: str, negative: str, seed: int,
                     loras: list = None,
                     hires_fix: bool = False,
                     upscale_model: str = "RealESRGAN_x4plus_anime_6B.pth",
-                    adetail: bool = False) -> dict:
+                    adetail: bool = False,
+                    init_image: Optional[str] = None,
+                    denoise_strength: float = 0.75) -> dict:
     if loras is None:
         loras = []
 
@@ -121,13 +123,15 @@ def _build_workflow(positive: str, negative: str, seed: int,
     else:
         save_image_src = ["7", 0]
 
+    # img2img: node 31 (VAEEncode) を latent 入力に使用。txt2img は node 2 (EmptyLatentImage)
+    latent_src   = ["31", 0] if init_image else ["2", 0]
+    base_denoise = denoise_strength if init_image else 1.0
+
     workflow = {
         "1": {"class_type": "CheckpointLoaderSimple",
               "inputs": {"ckpt_name": ckpt_name}},
         "20": {"class_type": "CLIPSetLastLayer",
                "inputs": {"clip": ["1", 1], "stop_at_clip_layer": -2}},
-        "2": {"class_type": "EmptyLatentImage",
-              "inputs": {"width": width, "height": height, "batch_size": 1}},
         "3": {"class_type": "VAELoader",
               "inputs": {"vae_name": "sdxl_vae.safetensors"}},
         "4": {"class_type": "CLIPTextEncode",
@@ -138,15 +142,31 @@ def _build_workflow(positive: str, negative: str, seed: int,
               "inputs": {
                   "seed": seed, "steps": steps, "cfg": cfg,
                   "sampler_name": "euler_ancestral", "scheduler": "karras",
-                  "denoise": 1.0, "model": model_src,
+                  "denoise": base_denoise, "model": model_src,
                   "positive": ["4", 0], "negative": ["5", 0],
-                  "latent_image": ["2", 0],
+                  "latent_image": latent_src,
               }},
         "7": {"class_type": "VAEDecode",
               "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
         "8": {"class_type": "SaveImage",
               "inputs": {"images": save_image_src, "filename_prefix": "comfy_chat/auto"}},
     }
+
+    # txt2img: EmptyLatentImage / img2img: LoadImage + VAEEncode
+    if init_image:
+        workflow["30"] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": init_image, "upload": "image"},
+        }
+        workflow["31"] = {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["30", 0], "vae": ["3", 0]},
+        }
+    else:
+        workflow["2"] = {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": width, "height": height, "batch_size": 1},
+        }
 
     # LoRA ノードを 100 番台で直列に連結（CLIP skip 済みの出力から開始）
     prev_model, prev_clip = ["1", 0], clip_skip_src
@@ -349,10 +369,13 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                               loras: list,
                               session: aiohttp.ClientSession,
                               hires_fix: bool = False,
-                              adetail: bool = False) -> Optional[dict]:
+                              adetail: bool = False,
+                              init_image: Optional[str] = None,
+                              denoise_strength: float = 0.75) -> Optional[dict]:
     client_id = str(uuid.uuid4())
     workflow = _build_workflow(positive, negative, seed, width, height, steps, cfg,
-                               ckpt_name, loras, hires_fix=hires_fix, adetail=adetail)
+                               ckpt_name, loras, hires_fix=hires_fix, adetail=adetail,
+                               init_image=init_image, denoise_strength=denoise_strength)
 
     async with session.post(
         f"{COMFY_BASE}/prompt",

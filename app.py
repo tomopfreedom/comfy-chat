@@ -151,6 +151,8 @@ async def handle_generate(request):
     seed      = int(body.get("seed", -1))
     hires_fix = bool(body.get("hires_fix", False))
     adetail   = bool(body.get("adetail", False))
+    init_image       = body.get("init_image") or None
+    denoise_strength = float(body.get("denoise", 0.75))
     if seed == -1:
         seed = random.randint(0, 2**32 - 1)
 
@@ -248,7 +250,8 @@ async def handle_generate(request):
         img_info = await submit_image_async(
             positive, negative, seed, width, height, steps, cfg,
             checkpoint, selected_loras, session,
-            hires_fix=hires_fix, adetail=adetail
+            hires_fix=hires_fix, adetail=adetail,
+            init_image=init_image, denoise_strength=denoise_strength,
         )
     except Exception as e:
         return web.json_response({"ok": False, "error": f"ComfyUI エラー: {e}"})
@@ -269,6 +272,34 @@ async def handle_generate(request):
         "image_url": image_url,
         "loras":     selected_loras,
     })
+
+
+async def handle_upload(request):
+    """参照画像を ComfyUI の /upload/image に転送し、ファイル名を返す。"""
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+        if field is None or field.name != "image":
+            return web.json_response(
+                {"ok": False, "error": "image フィールドがありません"}, status=400
+            )
+        data = await field.read()
+        filename = field.filename or "upload.png"
+
+        form = aiohttp.FormData()
+        form.add_field("image", data, filename=filename,
+                       content_type=field.headers.get("Content-Type", "image/png"))
+        async with request.app["session"].post(
+            f"{COMFY_BASE}/upload/image",
+            data=form,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            result = await resp.json(content_type=None)
+
+        uploaded_name = result.get("name", filename)
+        return web.json_response({"ok": True, "filename": uploaded_name})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
 
 
 async def handle_image(request):
@@ -346,6 +377,7 @@ def main():
     app.router.add_delete("/api/loras/{filename}", handle_loras_delete)
     app.router.add_get("/api/lora-files",        handle_lora_files)
     app.router.add_post("/api/generate",         handle_generate)
+    app.router.add_post("/api/upload",           handle_upload)
     app.router.add_get("/api/image",             handle_image)
     app.router.add_get("/api/health",            handle_health)
 
