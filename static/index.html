@@ -461,6 +461,61 @@
       border-radius: 6px; border: 1px solid #2a2a4a;
     }
     #display-canvas { display: block; cursor: crosshair; touch-action: none; }
+
+    /* ── フレーズサジェスト ──────────────────────── */
+    #phrase-bar {
+      background: #0a0a16;
+      border: 1px solid #1e1e3a;
+      border-radius: 5px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    #phrase-cats {
+      display: flex;
+      overflow-x: auto;
+      scrollbar-width: none;
+      border-bottom: 1px solid #1e1e3a;
+    }
+    #phrase-cats::-webkit-scrollbar { display: none; }
+    .pcat-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #444466;
+      font-size: 0.7rem;
+      padding: 4px 9px;
+      cursor: pointer;
+      white-space: nowrap;
+      margin-bottom: -1px;
+      transition: color 0.1s;
+    }
+    .pcat-btn:hover  { color: #7777aa; }
+    .pcat-btn.active { color: #8888ff; border-bottom-color: #5555cc; }
+    #phrase-chips {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 4px;
+      padding: 5px 7px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2a2a4a transparent;
+    }
+    #phrase-chips::-webkit-scrollbar       { height: 3px; }
+    #phrase-chips::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 2px; }
+    .pchip {
+      background: #141428;
+      border: 1px solid #2a2a4a;
+      border-radius: 9px;
+      color: #7777bb;
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background 0.1s, color 0.1s;
+    }
+    .pchip:hover       { background: #1e1e40; color: #aaaaee; border-color: #4444aa; }
+    .pchip.recent-chip { color: #88aacc; border-color: #2a3a4a; }
   </style>
 </head>
 <body>
@@ -576,6 +631,11 @@
           <input type="range" id="denoise-slider" min="0.1" max="1.0" step="0.05" value="0.75">
           <span id="denoise-val">0.75</span>
         </div>
+      </div>
+      <!-- フレーズサジェスト -->
+      <div id="phrase-bar">
+        <div id="phrase-cats"></div>
+        <div id="phrase-chips"></div>
       </div>
       <textarea id="user-input"
         placeholder="例：青空の下でコーヒーを飲む猫、アニメ風..."></textarea>
@@ -859,6 +919,9 @@
       // 会話履歴を更新
       chatHistory.push({role: "user",      content: text});
       chatHistory.push({role: "assistant", content: d.positive});
+      // 最近の入力を記録（フレーズサジェスト「最近」タブに表示）
+      saveRecentInput(text);
+      if (activePcat >= PHRASES.length) renderPhraseChips(activePcat);
 
       const summary = d.positive.length > 80
         ? d.positive.slice(0, 80) + "…" : d.positive;
@@ -1133,6 +1196,77 @@
     } catch (e) { alert("エラー: " + e.message); }
   });
   $("mask-edit-btn").addEventListener("click", openMaskEditor);
+
+  // ── フレーズサジェスト ─────────────────────────────────────────────
+  const PHRASES = [
+    { cat: "構図",         items: ["クローズアップで", "バストアップで", "全身で", "ローアングルで", "ハイアングルで", "サイドビューで", "後ろ姿で", "俯瞰で", "横向きで", "ポートレートで"] },
+    { cat: "ライティング", items: ["夕暮れの光で", "夜景背景で", "自然光で", "逆光で", "月明かりで", "朝日の中で", "スタジオ照明で", "薄暗い室内で", "夜の街灯の下で"] },
+    { cat: "雰囲気",       items: ["笑顔で", "物憂げに", "真剣な表情で", "恥ずかしそうに", "眠そうに", "怒った様子で", "無表情で", "楽しそうに", "驚いた顔で", "泣いている"] },
+    { cat: "場所",         items: ["室内で", "屋外で", "海辺で", "森の中で", "都市背景で", "学校で", "温泉で", "花畑で", "カフェで", "和室で", "公園で", "電車の中で"] },
+    { cat: "スタイル",     items: ["アニメ風で", "水彩画風で", "リアル調で", "油絵風で", "イラスト風で", "シンプルな背景で", "モノクロで", "レトロな雰囲気で"] },
+  ];
+  const RECENT_KEY = "comfy_chat_recent_inputs";
+  let activePcat = 0;
+
+  function getRecentInputs() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; }
+  }
+
+  function saveRecentInput(text) {
+    if (!text) return;
+    const recent = getRecentInputs().filter(t => t !== text);
+    recent.unshift(text);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, 15)));
+  }
+
+  function renderPhraseChips(catIdx) {
+    const chips = $("phrase-chips");
+    chips.innerHTML = "";
+    const isRecent = catIdx >= PHRASES.length;
+    const items = isRecent ? getRecentInputs() : PHRASES[catIdx].items;
+
+    if (isRecent && !items.length) {
+      chips.innerHTML = '<span style="font-size:0.7rem;color:#333355;white-space:nowrap">生成後に最近の入力が表示されます</span>';
+      return;
+    }
+    items.forEach(item => {
+      const btn = document.createElement("button");
+      btn.className = "pchip" + (isRecent ? " recent-chip" : "");
+      btn.textContent = isRecent && item.length > 20 ? item.slice(0, 20) + "…" : item;
+      btn.title = item;
+      btn.addEventListener("click", () => {
+        const ta = $("user-input");
+        if (isRecent) {
+          ta.value = item;
+        } else {
+          const v = ta.value.trimEnd();
+          ta.value = v ? v + "、" + item : item;
+        }
+        ta.focus();
+      });
+      chips.appendChild(btn);
+    });
+  }
+
+  function buildPhraseTabs() {
+    const cats = $("phrase-cats");
+    cats.innerHTML = "";
+    [...PHRASES.map(p => p.cat), "最近"].forEach((name, i) => {
+      const btn = document.createElement("button");
+      btn.className = "pcat-btn" + (i === 0 ? " active" : "");
+      btn.textContent = name;
+      btn.addEventListener("click", () => {
+        cats.querySelectorAll(".pcat-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        activePcat = i;
+        renderPhraseChips(i);
+      });
+      cats.appendChild(btn);
+    });
+    renderPhraseChips(0);
+  }
+
+  buildPhraseTabs();
 </script>
 <!-- マスク編集モーダル -->
 <div id="mask-modal">
