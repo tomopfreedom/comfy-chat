@@ -410,6 +410,57 @@
       flex: 1; accent-color: #5555cc; height: 14px; cursor: pointer;
     }
     #denoise-val { font-family: monospace; color: #8888cc; min-width: 28px; text-align: right; }
+
+    /* ── マスク編集ボタン ────────────────────────── */
+    #mask-edit-btn {
+      background: #1a1a3a; color: #8888cc;
+      border: 1px solid #2a2a5a; border-radius: 3px;
+      padding: 2px 7px; font-size: 0.72rem;
+      cursor: pointer; flex-shrink: 0;
+    }
+    #mask-edit-btn:hover { background: #252555; }
+    #mask-edit-btn.has-mask { color: #80c080; border-color: #2a5a2a; background: #1a2a1a; }
+
+    /* ── マスク編集モーダル ───────────────────────── */
+    #mask-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88); z-index: 100;
+      flex-direction: column; align-items: center;
+      justify-content: center; gap: 12px; padding: 16px;
+    }
+    #mask-modal.open { display: flex; }
+
+    #mask-modal-header {
+      display: flex; align-items: center; gap: 10px;
+      background: #1a1a2e; padding: 8px 14px;
+      border-radius: 8px; border: 1px solid #2a2a4a;
+      width: 100%; max-width: 920px; flex-wrap: wrap;
+    }
+    #mask-modal-title { color: #8888ff; font-size: 0.82rem; flex: 1; white-space: nowrap; min-width: 160px; }
+    .mask-ctrl-group  { display: flex; align-items: center; gap: 5px; }
+    .mask-ctrl-label  { font-size: 0.72rem; color: #666; }
+    #brush-size       { width: 70px; accent-color: #5555cc; cursor: pointer; }
+    #brush-size-val   { font-family: monospace; color: #8888cc; font-size: 0.72rem; min-width: 20px; }
+
+    #eraser-btn, #mask-clear-btn, #mask-cancel-btn, #mask-apply-btn {
+      border-radius: 4px; padding: 4px 10px;
+      font-size: 0.78rem; cursor: pointer; white-space: nowrap;
+    }
+    #eraser-btn        { background: #1a1a2e; color: #aaaacc; border: 1px solid #2a2a4a; }
+    #eraser-btn.active { background: #2a2a5a; border-color: #5555aa; color: #ccccff; }
+    #eraser-btn:hover  { background: #252545; }
+    #mask-clear-btn    { background: #2a1a1a; color: #cc7070; border: 1px solid #4a2a2a; }
+    #mask-clear-btn:hover { background: #3a1a1a; }
+    #mask-cancel-btn   { background: #1a1a2e; color: #888; border: 1px solid #2a2a4a; }
+    #mask-cancel-btn:hover { background: #252535; }
+    #mask-apply-btn    { background: #1e3a1e; color: #80c080; border: 1px solid #2a5a2a; }
+    #mask-apply-btn:hover  { background: #243a24; }
+
+    #mask-canvas-wrapper {
+      overflow: auto; max-width: 90vw; max-height: 75vh;
+      border-radius: 6px; border: 1px solid #2a2a4a;
+    }
+    #display-canvas { display: block; cursor: crosshair; touch-action: none; }
   </style>
 </head>
 <body>
@@ -517,6 +568,7 @@
         <div id="img2img-preview">
           <img id="img2img-thumb" alt="">
           <span id="img2img-name"></span>
+          <button id="mask-edit-btn" title="マスクを描いてインペイント">✏️ マスク</button>
           <button id="img2img-clear" title="クリア">✕</button>
         </div>
         <div id="img2img-denoise">
@@ -788,6 +840,7 @@
       hires_fix:  $("hires-fix").checked,
       adetail:    $("adetail").checked,
       init_image: uploadedImageName || null,
+      mask_image: uploadedMaskName  || null,
       denoise:    uploadedImageName ? parseFloat($("denoise-slider").value) : 1.0,
     };
 
@@ -919,6 +972,10 @@
 
   // ── img2img ─────────────────────────────────────────────────────
   let uploadedImageName = null;
+  let uploadedMaskName  = null;
+  let maskCanvas = null, maskCtx = null;
+  let imgNaturalW = 0,   imgNaturalH = 0;
+  let isEraser = false,  isPainting = false;
 
   $("img2img-drop").addEventListener("click", () => $("img2img-input").click());
   $("img2img-input").addEventListener("change", e => {
@@ -953,7 +1010,11 @@
       if (!d.ok) { alert("アップロード失敗: " + (d.error || "不明")); return; }
       uploadedImageName = d.filename;
       const reader = new FileReader();
-      reader.onload = ev => { $("img2img-thumb").src = ev.target.result; };
+      reader.onload = ev => {
+        const thumb = $("img2img-thumb");
+        thumb.onload = () => { imgNaturalW = thumb.naturalWidth; imgNaturalH = thumb.naturalHeight; };
+        thumb.src = ev.target.result;
+      };
       reader.readAsDataURL(file);
       $("img2img-name").textContent = file.name;
       $("img2img-drop").style.display = "none";
@@ -966,13 +1027,131 @@
 
   function clearImg2img() {
     uploadedImageName = null;
+    uploadedMaskName  = null;
+    maskCanvas = null; maskCtx = null;
+    imgNaturalW = 0;   imgNaturalH = 0;
+    isEraser = false;
     $("img2img-input").value = "";
     $("img2img-thumb").src = "";
     $("img2img-name").textContent = "";
     $("img2img-drop").style.display = "";
     $("img2img-preview").style.display = "none";
     $("img2img-denoise").style.display = "none";
+    $("mask-edit-btn").classList.remove("has-mask");
   }
+
+  // ── マスク編集 ────────────────────────────────────────────────────
+  function openMaskEditor() {
+    if (!imgNaturalW || !imgNaturalH) { alert("参照画像がまだ読み込まれていません"); return; }
+    if (!maskCanvas) {
+      maskCanvas = document.createElement("canvas");
+      maskCanvas.width  = imgNaturalW;
+      maskCanvas.height = imgNaturalH;
+      maskCtx = maskCanvas.getContext("2d");
+      maskCtx.fillStyle = "black";
+      maskCtx.fillRect(0, 0, imgNaturalW, imgNaturalH);
+    }
+    const maxW = window.innerWidth  * 0.88;
+    const maxH = window.innerHeight * 0.72;
+    const scale = Math.min(maxW / imgNaturalW, maxH / imgNaturalH, 1);
+    const dCanvas = $("display-canvas");
+    dCanvas.width  = Math.round(imgNaturalW * scale);
+    dCanvas.height = Math.round(imgNaturalH * scale);
+    redrawDisplay();
+    $("mask-modal").classList.add("open");
+  }
+
+  function redrawDisplay() {
+    const dCanvas = $("display-canvas");
+    const dCtx    = dCanvas.getContext("2d");
+    dCtx.clearRect(0, 0, dCanvas.width, dCanvas.height);
+    dCtx.drawImage($("img2img-thumb"), 0, 0, dCanvas.width, dCanvas.height);
+    if (maskCanvas) {
+      dCtx.globalAlpha = 0.55;
+      dCtx.drawImage(maskCanvas, 0, 0, dCanvas.width, dCanvas.height);
+      dCtx.globalAlpha = 1.0;
+    }
+  }
+
+  function paintAt(cx, cy) {
+    if (!maskCanvas) return;
+    const dCanvas = $("display-canvas");
+    const sx = maskCanvas.width  / dCanvas.width;
+    const sy = maskCanvas.height / dCanvas.height;
+    const r  = parseInt($("brush-size").value) / 2 * Math.max(sx, sy);
+    maskCtx.beginPath();
+    maskCtx.arc(cx * sx, cy * sy, r, 0, Math.PI * 2);
+    maskCtx.fillStyle = isEraser ? "black" : "red";
+    maskCtx.fill();
+    redrawDisplay();
+  }
+
+  const dCanv = $("display-canvas");
+  dCanv.addEventListener("mousedown",  e => { isPainting = true;  const r = dCanv.getBoundingClientRect(); paintAt(e.clientX-r.left, e.clientY-r.top); });
+  dCanv.addEventListener("mousemove",  e => { if (!isPainting) return; const r = dCanv.getBoundingClientRect(); paintAt(e.clientX-r.left, e.clientY-r.top); });
+  dCanv.addEventListener("mouseup",    () => { isPainting = false; });
+  dCanv.addEventListener("mouseleave", () => { isPainting = false; });
+  dCanv.addEventListener("touchstart", e => { e.preventDefault(); isPainting = true;  const r = dCanv.getBoundingClientRect(), t = e.touches[0]; paintAt(t.clientX-r.left, t.clientY-r.top); }, {passive:false});
+  dCanv.addEventListener("touchmove",  e => { e.preventDefault(); if (!isPainting) return; const r = dCanv.getBoundingClientRect(), t = e.touches[0]; paintAt(t.clientX-r.left, t.clientY-r.top); }, {passive:false});
+  dCanv.addEventListener("touchend",   () => { isPainting = false; });
+
+  $("brush-size").addEventListener("input", () => { $("brush-size-val").textContent = $("brush-size").value; });
+  $("eraser-btn").addEventListener("click", () => { isEraser = !isEraser; $("eraser-btn").classList.toggle("active", isEraser); });
+  $("mask-clear-btn").addEventListener("click", () => {
+    if (!maskCtx) return;
+    maskCtx.fillStyle = "black";
+    maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    uploadedMaskName = null;
+    $("mask-edit-btn").classList.remove("has-mask");
+    redrawDisplay();
+  });
+  $("mask-cancel-btn").addEventListener("click", () => { $("mask-modal").classList.remove("open"); });
+  $("mask-apply-btn").addEventListener("click", async () => {
+    if (!maskCanvas) return;
+    const blob = await new Promise(resolve => {
+      const tmp    = document.createElement("canvas");
+      tmp.width    = maskCanvas.width; tmp.height = maskCanvas.height;
+      const tmpCtx = tmp.getContext("2d");
+      tmpCtx.drawImage(maskCanvas, 0, 0);
+      const imgData = tmpCtx.getImageData(0, 0, tmp.width, tmp.height);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const val = d[i] > 128 ? 255 : 0;
+        d[i] = d[i+1] = d[i+2] = val; d[i+3] = 255;
+      }
+      tmpCtx.putImageData(imgData, 0, 0);
+      tmp.toBlob(resolve, "image/png");
+    });
+    const form = new FormData();
+    form.append("image", blob, "mask.png");
+    try {
+      const resp = await fetch("/api/upload", {method: "POST", body: form}).then(r => r.json());
+      if (!resp.ok) { alert("マスクのアップロードに失敗: " + (resp.error || "")); return; }
+      uploadedMaskName = resp.filename;
+      $("mask-edit-btn").classList.add("has-mask");
+      $("mask-modal").classList.remove("open");
+    } catch (e) { alert("エラー: " + e.message); }
+  });
+  $("mask-edit-btn").addEventListener("click", openMaskEditor);
 </script>
+<!-- マスク編集モーダル -->
+<div id="mask-modal">
+  <div id="mask-modal-header">
+    <span id="mask-modal-title">✏️ マスク編集 — 再生成したい部分を塗ってください</span>
+    <div class="mask-ctrl-group">
+      <span class="mask-ctrl-label">ブラシ</span>
+      <input type="range" id="brush-size" min="5" max="100" value="30">
+      <span id="brush-size-val">30</span>
+    </div>
+    <button id="eraser-btn">消しゴム</button>
+    <button id="mask-clear-btn">クリア</button>
+    <button id="mask-cancel-btn">キャンセル</button>
+    <button id="mask-apply-btn">確定</button>
+  </div>
+  <div id="mask-canvas-wrapper">
+    <canvas id="display-canvas"></canvas>
+  </div>
+</div>
+
 </body>
 </html>

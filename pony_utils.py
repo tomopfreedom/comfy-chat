@@ -98,7 +98,8 @@ def _build_workflow(positive: str, negative: str, seed: int,
                     upscale_model: str = "RealESRGAN_x4plus_anime_6B.pth",
                     adetail: bool = False,
                     init_image: Optional[str] = None,
-                    denoise_strength: float = 0.75) -> dict:
+                    denoise_strength: float = 0.75,
+                    mask_image: Optional[str] = None) -> dict:
     if loras is None:
         loras = []
 
@@ -123,8 +124,16 @@ def _build_workflow(positive: str, negative: str, seed: int,
     else:
         save_image_src = ["7", 0]
 
-    # img2img: node 31 (VAEEncode) を latent 入力に使用。txt2img は node 2 (EmptyLatentImage)
-    latent_src   = ["31", 0] if init_image else ["2", 0]
+    # latent 入力の決定:
+    #   インペイント (init_image + mask_image) → node 34 (VAEEncodeForInpaint)
+    #   img2img (init_image のみ)             → node 31 (VAEEncode)
+    #   txt2img                               → node 2  (EmptyLatentImage)
+    if init_image and mask_image:
+        latent_src = ["34", 0]
+    elif init_image:
+        latent_src = ["31", 0]
+    else:
+        latent_src = ["2", 0]
     base_denoise = denoise_strength if init_image else 1.0
 
     workflow = {
@@ -158,10 +167,30 @@ def _build_workflow(positive: str, negative: str, seed: int,
             "class_type": "LoadImage",
             "inputs": {"image": init_image, "upload": "image"},
         }
-        workflow["31"] = {
-            "class_type": "VAEEncode",
-            "inputs": {"pixels": ["30", 0], "vae": ["3", 0]},
-        }
+        if mask_image:
+            # インペイント: mask を ImageToMask に通して VAEEncodeForInpaint へ
+            workflow["32"] = {
+                "class_type": "LoadImage",
+                "inputs": {"image": mask_image, "upload": "image"},
+            }
+            workflow["33"] = {
+                "class_type": "ImageToMask",
+                "inputs": {"image": ["32", 0], "channel": "red"},
+            }
+            workflow["34"] = {
+                "class_type": "VAEEncodeForInpaint",
+                "inputs": {
+                    "pixels":       ["30", 0],
+                    "vae":          ["3", 0],
+                    "mask":         ["33", 0],
+                    "grow_mask_by": 6,
+                },
+            }
+        else:
+            workflow["31"] = {
+                "class_type": "VAEEncode",
+                "inputs": {"pixels": ["30", 0], "vae": ["3", 0]},
+            }
     else:
         workflow["2"] = {
             "class_type": "EmptyLatentImage",
@@ -371,11 +400,13 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                               hires_fix: bool = False,
                               adetail: bool = False,
                               init_image: Optional[str] = None,
-                              denoise_strength: float = 0.75) -> Optional[dict]:
+                              denoise_strength: float = 0.75,
+                              mask_image: Optional[str] = None) -> Optional[dict]:
     client_id = str(uuid.uuid4())
     workflow = _build_workflow(positive, negative, seed, width, height, steps, cfg,
                                ckpt_name, loras, hires_fix=hires_fix, adetail=adetail,
-                               init_image=init_image, denoise_strength=denoise_strength)
+                               init_image=init_image, denoise_strength=denoise_strength,
+                               mask_image=mask_image)
 
     async with session.post(
         f"{COMFY_BASE}/prompt",

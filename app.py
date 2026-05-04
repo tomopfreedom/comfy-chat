@@ -152,6 +152,7 @@ async def handle_generate(request):
     hires_fix = bool(body.get("hires_fix", False))
     adetail   = bool(body.get("adetail", False))
     init_image       = body.get("init_image") or None
+    mask_image       = body.get("mask_image") or None
     denoise_strength = float(body.get("denoise", 0.75))
     if seed == -1:
         seed = random.randint(0, 2**32 - 1)
@@ -252,6 +253,7 @@ async def handle_generate(request):
             checkpoint, selected_loras, session,
             hires_fix=hires_fix, adetail=adetail,
             init_image=init_image, denoise_strength=denoise_strength,
+            mask_image=mask_image,
         )
     except Exception as e:
         return web.json_response({"ok": False, "error": f"ComfyUI エラー: {e}"})
