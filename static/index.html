@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ComfyUI Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f0f1a;
+      color: #d0d0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── ヘッダー ───────────────────────────────── */
+    #header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      background: #1a1a2e;
+      border-bottom: 1px solid #2a2a4a;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    #header h1 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #8888ff;
+      white-space: nowrap;
+      margin-right: 4px;
+    }
+    #header label {
+      font-size: 0.72rem;
+      color: #777;
+      white-space: nowrap;
+    }
+    #header select,
+    #header input[type=number] {
+      background: #0f0f1a;
+      color: #d0d0e0;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 3px 6px;
+      font-size: 0.78rem;
+    }
+    #checkpoint { max-width: 240px; }
+
+    #lora-toggle-btn {
+      background: #1e2a1e;
+      color: #80c080;
+      border: 1px solid #2a4a2a;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #lora-toggle-btn:hover { background: #243024; }
+    #lora-toggle-btn.active { background: #2a4a2a; border-color: #4a8a4a; }
+
+    #health {
+      margin-left: auto;
+      display: flex;
+      gap: 10px;
+    }
+    .hdot { display: flex; align-items: center; gap: 5px; font-size: 0.72rem; color: #666; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #333; flex-shrink: 0; }
+    .dot.ok  { background: #4caf50; }
+    .dot.err { background: #f44336; }
+
+    /* ── LoRA 管理パネル ─────────────────────────── */
+    #lora-panel {
+      display: none;
+      background: #0d0d20;
+      border-bottom: 1px solid #2a2a4a;
+      padding: 10px 14px;
+      flex-shrink: 0;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    #lora-panel.open { display: block; }
+
+    .lp-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .lp-row:last-child { margin-bottom: 0; }
+
+    #lora-list { margin-bottom: 10px; }
+    .lora-entry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      background: #141425;
+      border-radius: 5px;
+      margin-bottom: 4px;
+      font-size: 0.78rem;
+    }
+    .lora-entry-name { color: #a0c0a0; font-family: monospace; flex-shrink: 0; }
+    .lora-entry-desc { color: #888; flex: 1; }
+    .lora-entry-trigger { color: #6688aa; font-size: 0.7rem; white-space: nowrap; }
+    .lora-del-btn {
+      background: none;
+      border: 1px solid #4a2a2a;
+      color: #c06060;
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .lora-del-btn:hover { background: #2a1010; }
+
+    .lora-badge {
+      font-size: 0.65rem;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      font-weight: 600;
+    }
+    .badge-pony { background: #2a1a3a; color: #c080ff; border: 1px solid #4a2a6a; }
+    .badge-sdxl { background: #1a2a3a; color: #80c0ff; border: 1px solid #2a4a6a; }
+    .badge-flux { background: #1a3a2a; color: #80ffc0; border: 1px solid #2a6a4a; }
+    .badge-any  { background: #2a2a2a; color: #aaaaaa; border: 1px solid #4a4a4a; }
+
+    /* 非互換 LoRA をグレーアウト */
+    .lora-entry.incompatible { opacity: 0.35; }
+
+    #lora-empty { color: #3a3a5a; font-size: 0.8rem; padding: 4px 0 8px; }
+
+    .lp-input {
+      background: #0f0f1a;
+      color: #d0d0e0;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 4px 7px;
+      font-size: 0.78rem;
+    }
+    #lora-file-sel { min-width: 200px; max-width: 260px; }
+    #lora-desc-inp { min-width: 160px; flex: 1; }
+    #lora-trigger-inp { min-width: 120px; }
+    #lora-strength-inp { width: 60px; }
+    #lora-add-btn {
+      background: #1e3a1e;
+      color: #80c080;
+      border: 1px solid #2a5a2a;
+      border-radius: 4px;
+      padding: 4px 12px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #lora-add-btn:hover { background: #243a24; }
+
+    /* ── メインレイアウト ────────────────────────── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── チャットパネル ──────────────────────────── */
+    #chat-panel {
+      width: 38%;
+      min-width: 280px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #2a2a4a;
+    }
+
+    #chat-history {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #chat-history::-webkit-scrollbar { width: 4px; }
+    #chat-history::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 2px; }
+
+    .msg {
+      max-width: 90%;
+      padding: 7px 11px;
+      border-radius: 10px;
+      font-size: 0.84rem;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .msg.user      { align-self: flex-end; background: #252565; color: #c8c8ff; }
+    .msg.assistant { align-self: flex-start; background: #1a281a; color: #90c090;
+                     font-family: monospace; font-size: 0.73rem; }
+    .msg-label { font-size: 0.63rem; opacity: 0.55; margin-bottom: 3px; }
+
+    #chat-empty {
+      color: #3a3a5a; font-size: 0.82rem; text-align: center;
+      padding: 24px 0; line-height: 1.8;
+    }
+
+    /* ── 入力エリア ─────────────────────────────── */
+    #input-area {
+      padding: 10px; border-top: 1px solid #2a2a4a;
+      display: flex; flex-direction: column; gap: 7px; flex-shrink: 0;
+    }
+    #user-input {
+      background: #141420; color: #d0d0e0;
+      border: 1px solid #2a2a4a; border-radius: 6px;
+      padding: 8px 10px; font-size: 0.88rem;
+      resize: vertical; min-height: 70px; max-height: 200px;
+      font-family: inherit; width: 100%; line-height: 1.45;
+    }
+    #user-input:focus { outline: none; border-color: #4444aa; }
+    #user-input::placeholder { color: #3a3a5a; }
+
+    #input-controls { display: flex; align-items: center; gap: 8px; }
+    .ctrl-label { font-size: 0.72rem; color: #666; white-space: nowrap; }
+    #seed-input {
+      background: #0f0f1a; color: #d0d0e0;
+      border: 1px solid #2a2a4a; border-radius: 4px;
+      padding: 3px 6px; font-size: 0.78rem; width: 88px;
+    }
+    #generate-btn {
+      margin-left: auto;
+      background: #3a3aaa; color: #fff; border: none;
+      border-radius: 6px; padding: 7px 18px;
+      font-size: 0.88rem; cursor: pointer;
+      transition: background 0.15s; white-space: nowrap;
+    }
+    #generate-btn:hover:not(:disabled) { background: #5555cc; }
+    #generate-btn:disabled { background: #252535; color: #555; cursor: default; }
+    .hint { font-size: 0.65rem; color: #444; white-space: nowrap; }
+
+    /* ── プレビューパネル ─────────────────────────── */
+    #preview-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    #image-container {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      background: #080810; overflow: hidden;
+    }
+    #preview-img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain; border-radius: 3px; display: none;
+    }
+    #img-placeholder { color: #282840; font-size: 0.9rem; text-align: center; user-select: none; }
+    #spinner {
+      display: none; flex-direction: column; align-items: center;
+      gap: 14px; color: #555; font-size: 0.85rem;
+    }
+    .spin-ring {
+      width: 38px; height: 38px;
+      border: 3px solid #1a1a2e; border-top-color: #5555cc;
+      border-radius: 50%; animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── プロンプト情報 ───────────────────────────── */
+    #prompt-info {
+      padding: 9px 14px; border-top: 1px solid #2a2a4a;
+      font-size: 0.73rem; background: #0c0c18;
+      max-height: 140px; overflow-y: auto; flex-shrink: 0;
+    }
+    #prompt-info::-webkit-scrollbar { width: 3px; }
+    #prompt-info::-webkit-scrollbar-thumb { background: #2a2a4a; }
+    .pi-row { display: flex; gap: 7px; margin-bottom: 4px; line-height: 1.4; }
+    .pi-lbl { color: #556688; font-weight: 600; white-space: nowrap; min-width: 54px; }
+    .pi-val { color: #8aacb8; word-break: break-word; }
+    .pi-val.seed  { color: #9999ee; font-family: monospace; }
+    .pi-val.loras { color: #80c080; font-family: monospace; }
+    #pi-empty { color: #2a2a4a; font-size: 0.78rem; }
+  </style>
+</head>
+<body>
+
+<header id="header">
+  <h1>🎨 ComfyUI Chat</h1>
+
+  <label>モデル</label>
+  <select id="checkpoint"><option value="">読み込み中...</option></select>
+
+  <label>幅</label>
+  <select id="width">
+    <option value="832">832</option>
+    <option value="1024" selected>1024</option>
+    <option value="1216">1216</option>
+  </select>
+
+  <label>高さ</label>
+  <select id="height">
+    <option value="832">832</option>
+    <option value="1024" selected>1024</option>
+    <option value="1216">1216</option>
+  </select>
+
+  <label>Steps</label>
+  <input type="number" id="steps" value="25" min="10" max="50" style="width:50px">
+
+  <label>CFG</label>
+  <input type="number" id="cfg" value="7" min="1" max="20" step="0.5" style="width:50px">
+
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+    <input type="checkbox" id="hires-fix" style="accent-color:#6666cc">
+    <span style="font-size:0.72rem;color:#aaa">Hires fix</span>
+  </label>
+
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+    <input type="checkbox" id="adetail" style="accent-color:#66aa66">
+    <span style="font-size:0.72rem;color:#aaa">ADetail</span>
+  </label>
+
+  <button id="lora-toggle-btn">🧩 LoRA 管理</button>
+
+  <div id="health">
+    <div class="hdot"><div class="dot" id="dot-llm"></div><span>LLM</span></div>
+    <div class="hdot"><div class="dot" id="dot-comfy"></div><span>ComfyUI</span></div>
+  </div>
+</header>
+
+<!-- LoRA 管理パネル（トグル） -->
+<div id="lora-panel">
+  <div id="lora-list"><span id="lora-empty">登録済み LoRA はありません</span></div>
+
+  <div class="lp-row">
+    <select id="lora-file-sel" class="lp-input">
+      <option value="">LoRA ファイルを選択...</option>
+    </select>
+    <input id="lora-desc-inp" class="lp-input"
+           placeholder="説明（例: アニメ風スタイル、日本語で）" type="text">
+    <input id="lora-trigger-inp" class="lp-input"
+           placeholder="トリガーワード（任意）" type="text" style="width:160px">
+    <label style="font-size:0.72rem;color:#777;white-space:nowrap;align-self:center">強度</label>
+    <input id="lora-strength-inp" class="lp-input" type="number"
+           value="0.75" min="0.1" max="1.5" step="0.05">
+    <select id="lora-base-model" class="lp-input" style="width:80px">
+      <option value="pony">Pony</option>
+      <option value="sdxl">SDXL</option>
+      <option value="flux">Flux</option>
+      <option value="any">汎用</option>
+    </select>
+    <button id="lora-add-btn">＋ 登録</button>
+  </div>
+</div>
+
+<main id="main">
+  <!-- チャットパネル -->
+  <div id="chat-panel">
+    <div id="chat-history">
+      <div id="chat-empty">
+        日本語で画像の内容を入力してください<br>
+        <span style="font-size:0.72rem">例：赤いドレスの女性が花畑に立っている</span>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <textarea id="user-input"
+        placeholder="例：青空の下でコーヒーを飲む猫、アニメ風..."></textarea>
+      <div id="input-controls">
+        <span class="ctrl-label">Seed</span>
+        <input type="number" id="seed-input" value="-1" title="-1 でランダム">
+        <span class="hint">Ctrl+Enter</span>
+        <button id="generate-btn">生成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- プレビューパネル -->
+  <div id="preview-panel">
+    <div id="image-container">
+      <div id="img-placeholder">画像がここに表示されます</div>
+      <div id="spinner">
+        <div class="spin-ring"></div>
+        <span>生成中...</span>
+      </div>
+      <img id="preview-img" alt="生成画像">
+    </div>
+
+    <div id="prompt-info">
+      <span id="pi-empty">プロンプト情報がここに表示されます</span>
+    </div>
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  let chatHistory = [];
+  let generating  = false;
+
+  // ── ヘルスチェック ──────────────────────────────────────────────
+  async function checkHealth() {
+    try {
+      const d = await fetch("/api/health").then(r => r.json());
+      $("dot-llm").className   = "dot " + (d.llm     ? "ok" : "err");
+      $("dot-comfy").className = "dot " + (d.comfyui ? "ok" : "err");
+    } catch {
+      $("dot-llm").className = $("dot-comfy").className = "dot err";
+    }
+  }
+  checkHealth();
+  setInterval(checkHealth, 15000);
+
+  // ── チェックポイント一覧 ────────────────────────────────────────
+  async function loadCheckpoints() {
+    try {
+      const d = await fetch("/api/checkpoints").then(r => r.json());
+      const sel = $("checkpoint");
+      sel.innerHTML = "";
+      (d.checkpoints || []).forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c;
+        opt.textContent = c.replace(/\.safetensors$/i, "");
+        sel.appendChild(opt);
+      });
+      if (!d.checkpoints?.length) sel.innerHTML = '<option value="">取得失敗</option>';
+    } catch {
+      $("checkpoint").innerHTML = '<option value="">取得失敗</option>';
+    }
+  }
+  loadCheckpoints();
+
+  // ── LoRA 管理 ───────────────────────────────────────────────────
+
+  // LoRA ファイル一覧をセレクターに読み込む
+  async function loadLoraFiles() {
+    try {
+      const d = await fetch("/api/lora-files").then(r => r.json());
+      const sel = $("lora-file-sel");
+      sel.innerHTML = '<option value="">LoRA ファイルを選択...</option>';
+      (d.files || []).forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = f.replace(/\.safetensors$/i, "");
+        sel.appendChild(opt);
+      });
+    } catch { /* ComfyUI 未起動時は無視 */ }
+  }
+
+  // チェックポイント名からベースモデル種別を返す（サーバーと同じロジック）
+  function ckptType(ckptName) {
+    const n = (ckptName || "").toLowerCase();
+    if (n.includes("pony")) return "pony";
+    if (n.includes("flux")) return "flux";
+    return "sdxl";
+  }
+
+  // 登録済み LoRA を表示（現在のチェックポイントで互換性をハイライト）
+  async function loadLoraRegistry() {
+    try {
+      const registry = await fetch("/api/loras").then(r => r.json());
+      const list = $("lora-list");
+      list.innerHTML = "";
+      if (!registry.length) {
+        list.innerHTML = '<span id="lora-empty">登録済み LoRA はありません</span>';
+        return;
+      }
+      const currentType = ckptType($("checkpoint").value);
+      registry.forEach(entry => {
+        const div = document.createElement("div");
+        const bm = entry.base_model || "any";
+        const compatible = bm === "any" || bm === currentType;
+        div.className = "lora-entry" + (compatible ? "" : " incompatible");
+        div.dataset.baseModel = bm;
+
+        const trigger = entry.trigger_words
+          ? `<span class="lora-entry-trigger">trigger: ${esc(entry.trigger_words)}</span>` : "";
+        const badgeLabel = {pony:"Pony", sdxl:"SDXL", flux:"Flux", any:"汎用"}[bm] || bm;
+        div.innerHTML = `
+          <span class="lora-badge badge-${bm}">${badgeLabel}</span>
+          <span class="lora-entry-name">${esc(entry.filename.replace(/\.safetensors$/i,""))}</span>
+          <span class="lora-entry-desc">${esc(entry.description)}</span>
+          ${trigger}
+          <span class="lora-entry-trigger">×${entry.default_strength}</span>
+          <button class="lora-del-btn" data-fn="${esc(entry.filename)}">削除</button>`;
+        list.appendChild(div);
+      });
+      list.querySelectorAll(".lora-del-btn").forEach(btn => {
+        btn.addEventListener("click", () => deleteLora(btn.dataset.fn));
+      });
+    } catch {}
+  }
+
+  // チェックポイント変更時にパネルが開いていれば互換性表示を更新
+  $("checkpoint").addEventListener("change", () => {
+    if ($("lora-panel").classList.contains("open")) {
+      loadLoraRegistry();
+    }
+  });
+
+  // LoRA 登録
+  async function addLora() {
+    const filename    = $("lora-file-sel").value.trim();
+    const description = $("lora-desc-inp").value.trim();
+    if (!filename || !description) {
+      alert("LoRA ファイルと説明は必須です");
+      return;
+    }
+    const body = {
+      filename,
+      description,
+      trigger_words:    $("lora-trigger-inp").value.trim(),
+      default_strength: parseFloat($("lora-strength-inp").value) || 0.75,
+      base_model:       $("lora-base-model").value,
+    };
+    try {
+      const d = await fetch("/api/loras", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      if (d.ok) {
+        $("lora-desc-inp").value = "";
+        $("lora-trigger-inp").value = "";
+        $("lora-file-sel").value = "";
+        await loadLoraRegistry();
+      } else {
+        alert("登録失敗: " + d.error);
+      }
+    } catch (e) { alert("エラー: " + e.message); }
+  }
+
+  // LoRA 削除
+  async function deleteLora(filename) {
+    if (!confirm(`「${filename}」の登録を削除しますか？`)) return;
+    try {
+      await fetch("/api/loras/" + encodeURIComponent(filename), {method: "DELETE"});
+      await loadLoraRegistry();
+    } catch (e) { alert("エラー: " + e.message); }
+  }
+
+  // LoRA パネル トグル
+  $("lora-toggle-btn").addEventListener("click", () => {
+    const panel = $("lora-panel");
+    const isOpen = panel.classList.toggle("open");
+    $("lora-toggle-btn").classList.toggle("active", isOpen);
+    if (isOpen) {
+      loadLoraFiles();
+      loadLoraRegistry();
+    }
+  });
+
+  $("lora-add-btn").addEventListener("click", addLora);
+
+  // ── チャット表示 ────────────────────────────────────────────────
+  function addMsg(role, text) {
+    const hist = $("chat-history");
+    const empty = $("chat-empty");
+    if (empty) empty.remove();
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + role;
+    const lbl = document.createElement("div");
+    lbl.className = "msg-label";
+    lbl.textContent = role === "user" ? "あなた" : "AI プロンプト";
+    const body = document.createElement("div");
+    body.textContent = text;
+    wrap.appendChild(lbl);
+    wrap.appendChild(body);
+    hist.appendChild(wrap);
+    hist.scrollTop = hist.scrollHeight;
+  }
+
+  // ── プロンプト情報表示 ──────────────────────────────────────────
+  function showPromptInfo(positive, negative, seed, loras) {
+    let loraHtml = "";
+    if (loras && loras.length) {
+      const names = loras.map(l => `${l.name.replace(/\.safetensors$/i,"")}(×${l.strength||"?"})`).join(", ");
+      loraHtml = `<div class="pi-row">
+        <span class="pi-lbl">LoRA</span>
+        <span class="pi-val loras">${esc(names)}</span>
+      </div>`;
+    }
+    $("prompt-info").innerHTML = `
+      <div class="pi-row"><span class="pi-lbl">positive</span><span class="pi-val">${esc(positive)}</span></div>
+      <div class="pi-row"><span class="pi-lbl">negative</span><span class="pi-val">${esc(negative)}</span></div>
+      <div class="pi-row"><span class="pi-lbl">seed</span><span class="pi-val seed">${seed}</span></div>
+      ${loraHtml}`;
+  }
+
+  function setGenerating(state) {
+    generating = state;
+    $("generate-btn").disabled = state;
+    $("generate-btn").textContent = state ? "生成中..." : "生成";
+    if (state) {
+      $("img-placeholder").style.display = "none";
+      $("preview-img").style.display = "none";
+      $("spinner").style.display = "flex";
+    } else {
+      $("spinner").style.display = "none";
+    }
+  }
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  // ── 生成実行 ────────────────────────────────────────────────────
+  async function generate() {
+    if (generating) return;
+    const text = $("user-input").value.trim();
+    if (!text) return;
+
+    addMsg("user", text);
+    $("user-input").value = "";
+    setGenerating(true);
+
+    const payload = {
+      message:    text,
+      history:    chatHistory.slice(-6),
+      checkpoint: $("checkpoint").value,
+      width:      parseInt($("width").value),
+      height:     parseInt($("height").value),
+      steps:      parseInt($("steps").value),
+      cfg:        parseFloat($("cfg").value),
+      seed:       parseInt($("seed-input").value) || -1,
+      hires_fix:  $("hires-fix").checked,
+      adetail:    $("adetail").checked,
+    };
+
+    try {
+      const d = await fetch("/api/generate", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      }).then(r => r.json());
+
+      if (!d.ok) {
+        addMsg("assistant", "⚠ " + (d.error || "不明なエラー"));
+        return;
+      }
+
+      // 会話履歴を更新
+      chatHistory.push({role: "user",      content: text});
+      chatHistory.push({role: "assistant", content: d.positive});
+
+      const summary = d.positive.length > 80
+        ? d.positive.slice(0, 80) + "…" : d.positive;
+      addMsg("assistant", summary);
+
+      // 画像を表示
+      const img = $("preview-img");
+      img.onload = () => { img.style.display = "block"; };
+      img.src = d.image_url + "&_t=" + Date.now();
+
+      showPromptInfo(d.positive, d.negative, d.seed, d.loras);
+      $("seed-input").value = d.seed;
+
+    } catch (e) {
+      addMsg("assistant", "⚠ 通信エラー: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  $("generate-btn").addEventListener("click", generate);
+  $("user-input").addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); generate(); }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.pyo
+loras.json
+memo.md
