@@ -273,6 +273,85 @@
     .pi-val.seed  { color: #9999ee; font-family: monospace; }
     .pi-val.loras { color: #80c080; font-family: monospace; }
     #pi-empty { color: #2a2a4a; font-size: 0.78rem; }
+
+    /* ── お気に入りパネル ────────────────────────── */
+    #fav-toggle-btn {
+      background: #2a251a;
+      color: #c0a040;
+      border: 1px solid #4a3a1a;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #fav-toggle-btn:hover { background: #3a3010; }
+    #fav-toggle-btn.active { background: #3a3010; border-color: #7a6020; }
+
+    #fav-panel {
+      display: none;
+      background: #0d0d1a;
+      border-bottom: 1px solid #2a2a4a;
+      padding: 10px 14px;
+      flex-shrink: 0;
+    }
+    #fav-panel.open { display: block; }
+
+    #fav-save-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    #fav-name-inp {
+      background: #0f0f1a;
+      color: #d0d0e0;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 4px 7px;
+      font-size: 0.78rem;
+      flex: 1;
+      max-width: 280px;
+    }
+    #fav-save-btn {
+      background: #2a251a;
+      color: #c0a040;
+      border: 1px solid #4a3a1a;
+      border-radius: 4px;
+      padding: 4px 12px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #fav-save-btn:hover { background: #3a3010; }
+
+    #fav-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .fav-entry {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .fav-entry:hover { background: #252545; }
+    .fav-name { color: #c0a040; }
+    .fav-meta { color: #555; font-size: 0.65rem; }
+    .fav-del {
+      background: none;
+      border: none;
+      color: #663333;
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .fav-del:hover { color: #cc5555; }
+    #fav-empty { color: #3a3a5a; font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -314,6 +393,7 @@
   </label>
 
   <button id="lora-toggle-btn">🧩 LoRA 管理</button>
+  <button id="fav-toggle-btn">⭐ お気に入り</button>
 
   <div id="health">
     <div class="hdot"><div class="dot" id="dot-llm"></div><span>LLM</span></div>
@@ -343,6 +423,18 @@
       <option value="any">汎用</option>
     </select>
     <button id="lora-add-btn">＋ 登録</button>
+  </div>
+</div>
+
+<!-- お気に入りパネル（トグル） -->
+<div id="fav-panel">
+  <div id="fav-save-row">
+    <input id="fav-name-inp" type="text"
+           placeholder="名前を入力して現在の設定を保存...">
+    <button id="fav-save-btn">★ 保存</button>
+  </div>
+  <div id="fav-list">
+    <span id="fav-empty">保存済みのお気に入りはありません</span>
   </div>
 </div>
 
@@ -659,6 +751,92 @@
   $("generate-btn").addEventListener("click", generate);
   $("user-input").addEventListener("keydown", e => {
     if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); generate(); }
+  });
+
+  // ── お気に入り ──────────────────────────────────────────────────
+  const FAV_KEY = "comfy_chat_favorites";
+
+  function getFavorites() {
+    try { return JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch { return []; }
+  }
+
+  function saveFavorites(favs) {
+    localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+  }
+
+  function renderFavorites() {
+    const favs = getFavorites();
+    const list = $("fav-list");
+    list.innerHTML = "";
+    if (!favs.length) {
+      list.innerHTML = '<span id="fav-empty">保存済みのお気に入りはありません</span>';
+      return;
+    }
+    favs.forEach(fav => {
+      const div = document.createElement("div");
+      div.className = "fav-entry";
+      const ckpt = (fav.checkpoint || "?").replace(/\.safetensors$/i, "");
+      const ckptShort = ckpt.length > 22 ? ckpt.slice(0, 22) + "…" : ckpt;
+      div.innerHTML = `
+        <span class="fav-name">${esc(fav.name)}</span>
+        <span class="fav-meta">${esc(ckptShort)} ${fav.width}×${fav.height}</span>
+        <button class="fav-del" title="削除">✕</button>`;
+      div.addEventListener("click", e => {
+        if (e.target.classList.contains("fav-del")) return;
+        applyFavorite(fav);
+      });
+      div.querySelector(".fav-del").addEventListener("click", () => deleteFavorite(fav.id));
+      list.appendChild(div);
+    });
+  }
+
+  function applyFavorite(fav) {
+    if (fav.message    !== undefined) $("user-input").value    = fav.message;
+    if (fav.checkpoint !== undefined) $("checkpoint").value    = fav.checkpoint;
+    if (fav.width      !== undefined) $("width").value         = fav.width;
+    if (fav.height     !== undefined) $("height").value        = fav.height;
+    if (fav.steps      !== undefined) $("steps").value         = fav.steps;
+    if (fav.cfg        !== undefined) $("cfg").value           = fav.cfg;
+    $("hires-fix").checked = !!fav.hires_fix;
+    $("adetail").checked   = !!fav.adetail;
+    if ($("lora-panel").classList.contains("open")) loadLoraRegistry();
+  }
+
+  function deleteFavorite(id) {
+    saveFavorites(getFavorites().filter(f => f.id !== id));
+    renderFavorites();
+  }
+
+  function saveCurrentAsFavorite() {
+    const name = $("fav-name-inp").value.trim();
+    if (!name) { $("fav-name-inp").focus(); return; }
+    const fav = {
+      id:         Date.now().toString(),
+      name,
+      message:    $("user-input").value.trim(),
+      checkpoint: $("checkpoint").value,
+      width:      $("width").value,
+      height:     $("height").value,
+      steps:      $("steps").value,
+      cfg:        $("cfg").value,
+      hires_fix:  $("hires-fix").checked,
+      adetail:    $("adetail").checked,
+    };
+    saveFavorites([...getFavorites(), fav]);
+    $("fav-name-inp").value = "";
+    renderFavorites();
+  }
+
+  $("fav-toggle-btn").addEventListener("click", () => {
+    const panel = $("fav-panel");
+    const isOpen = panel.classList.toggle("open");
+    $("fav-toggle-btn").classList.toggle("active", isOpen);
+    if (isOpen) renderFavorites();
+  });
+
+  $("fav-save-btn").addEventListener("click", saveCurrentAsFavorite);
+  $("fav-name-inp").addEventListener("keydown", e => {
+    if (e.key === "Enter") saveCurrentAsFavorite();
   });
 </script>
 </body>
