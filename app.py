@@ -264,10 +264,11 @@ async def handle_translate(request):
     positive = _apply_lora_postprocess(positive, selected_loras, registry_map, checkpoint)
 
     return web.json_response({
-        "ok":       True,
-        "positive": positive,
-        "negative": negative,
-        "loras":    selected_loras,
+        "ok":          True,
+        "positive":    positive,
+        "negative":    negative,
+        "loras":       selected_loras,
+        "explanation": prompt_data.get("explanation", ""),
     })
 
 

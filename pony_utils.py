@@ -85,7 +85,7 @@ def _inject_loras(base_prompt: str, registry: list) -> str:
             )
     lines += [
         '\nAdd a "loras" key to your JSON with selected LoRAs:',
-        '{"positive": "...", "negative": "...", "loras": [{"name": "file.safetensors", "strength": 0.75}, ...]}',
+        '{"positive": "...", "negative": "...", "loras": [...], "explanation": "..."}',
         'If no LoRAs match, use "loras": []',
     ]
     return base_prompt + "\n".join(lines)

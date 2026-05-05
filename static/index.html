@@ -190,8 +190,8 @@
 
     /* ── チャットパネル ──────────────────────────── */
     #chat-panel {
-      width: 38%;
-      min-width: 280px;
+      width: 44%;
+      min-width: 300px;
       display: flex;
       flex-direction: column;
       border-right: 1px solid #2a2a4a;
@@ -551,6 +551,14 @@
       gap: 5px;
       width: 100%;
     }
+    .confirm-explanation {
+      color: #a0d4a0;
+      font-size: 0.82rem;
+      line-height: 1.55;
+      padding-bottom: 7px;
+      border-bottom: 1px solid #1e3a1e;
+      margin-bottom: 2px;
+    }
     .confirm-lbl {
       font-size: 0.63rem;
       color: #4a6a50;
@@ -566,9 +574,10 @@
       border-radius: 4px;
       padding: 5px 7px;
       resize: vertical;
-      min-height: 54px;
+      min-height: 70px;
       width: 100%;
-      line-height: 1.45;
+      line-height: 1.5;
+      overflow-y: hidden;
     }
     .confirm-ta:focus { outline: none; border-color: #3a7a3a; }
     .confirm-neg-ta {
@@ -1060,7 +1069,7 @@
         return;
       }
 
-      addConfirmMsg(d.positive, d.negative, d.loras, text);
+      addConfirmMsg(d.positive, d.negative, d.loras, text, d.explanation || "");
     } catch (e) {
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
@@ -1069,7 +1078,7 @@
   }
 
   // 確認パネルをチャットに追加
-  function addConfirmMsg(positive, negative, loras, originalText) {
+  function addConfirmMsg(positive, negative, loras, originalText, explanation) {
     const hist = $("chat-history");
     const empty = $("chat-empty");
     if (empty) empty.remove();
@@ -1081,7 +1090,10 @@
     lbl.textContent = "AI プロンプト (確認)";
     const panel = document.createElement("div");
     panel.className = "confirm-panel";
+    const explanationHtml = explanation
+      ? `<div class="confirm-explanation">${esc(explanation)}</div>` : "";
     panel.innerHTML =
+      explanationHtml +
       `<div class="confirm-lbl">positive</div>` +
       `<textarea class="confirm-ta confirm-pos-ta">${esc(positive)}</textarea>` +
       `<div class="confirm-lbl">negative</div>` +
@@ -1092,6 +1104,17 @@
     wrap.appendChild(lbl);
     wrap.appendChild(panel);
     hist.appendChild(wrap);
+
+    // テキストエリアをコンテンツに合わせて自動リサイズ
+    panel.querySelectorAll(".confirm-ta").forEach(ta => {
+      ta.style.height = "auto";
+      ta.style.height = Math.max(70, ta.scrollHeight) + "px";
+      ta.addEventListener("input", () => {
+        ta.style.height = "auto";
+        ta.style.height = Math.max(70, ta.scrollHeight) + "px";
+      });
+    });
+
     hist.scrollTop = hist.scrollHeight;
     panel.querySelector(".confirm-gen-btn").addEventListener("click", () => {
       generateFromConfirmed(wrap, panel, loras, originalText);

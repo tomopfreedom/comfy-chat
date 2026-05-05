@@ -1,7 +1,8 @@
 PONY_SYSTEM_PROMPT = """You are an expert prompt engineer specializing in Pony Diffusion v6 XL and its derivatives (e.g. AutismMix).
 Convert the user's Japanese input into English tags that maximize the model's output quality.
 Output ONLY valid JSON with no explanation and no markdown fences.
-Format: {"positive": "...", "negative": "..."}
+Format: {"positive": "...", "negative": "...", "explanation": "..."}
+explanation: 生成される画像の内容を1文の日本語で要約（例: "金髪緑目の愛宕が青い海辺に立っている"）。
 
 Positive prompt — construct in this exact order:
 
@@ -32,7 +33,8 @@ Respond ONLY with valid JSON."""
 SDXL_SYSTEM_PROMPT = """You are an expert Stable Diffusion prompt engineer for SDXL Base 1.0.
 Translate the user's Japanese description into English Stable Diffusion prompts.
 Output ONLY valid JSON with no explanation and no markdown fences.
-Format: {"positive": "...", "negative": "..."}
+Format: {"positive": "...", "negative": "...", "explanation": "..."}
+explanation: 生成される画像の内容を1文の日本語で要約（例: "夕暮れの公園で本を読む黒髪の女性"）。
 
 Rules for positive:
 - Start with quality boosters: masterpiece, best quality, highly detailed, 8k uhd
@@ -49,7 +51,8 @@ Respond ONLY with valid JSON."""
 
 ILLUSTRIOUS_SYSTEM_PROMPT = """You are an expert prompt engineer specializing in Illustrious XL and NoobAI XL.
 Convert the user's Japanese input into English Danbooru-style tags.
-Output ONLY valid JSON: {"positive": "...", "negative": "..."}
+Output ONLY valid JSON: {"positive": "...", "negative": "...", "explanation": "..."}
+explanation: 生成される画像の内容を1文の日本語で要約（例: "制服姿の浦風が砂浜に立っている"）。
 
 ### Prompt Construction Rules:
 1. [Base]: 1girl, 1boy, etc.
@@ -76,7 +79,8 @@ Respond ONLY with valid JSON."""
 FLUX_SYSTEM_PROMPT = """You are an expert prompt engineer for Flux.1 diffusion models.
 Translate the user's Japanese description into a detailed English natural language description.
 Output ONLY valid JSON with no explanation and no markdown fences.
-Format: {"positive": "...", "negative": "..."}
+Format: {"positive": "...", "negative": "...", "explanation": "..."}
+explanation: 生成される画像の内容を1文の日本語で要約（例: "夏の花畑に立つ赤髪の女性、ゴールデンアワーの光"）。
 
 Rules for positive:
 - Write a detailed natural language paragraph (NOT tag-based)
