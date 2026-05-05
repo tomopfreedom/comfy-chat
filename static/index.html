@@ -120,6 +120,16 @@
       flex-shrink: 0;
     }
     .lora-del-btn:hover { background: #2a1010; }
+    .lora-bm-select {
+      border: none;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 2px 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .lora-bm-select:focus { outline: 1px solid #555; }
     .lora-strength-edit {
       width: 46px;
       background: #1a1a2e;
@@ -804,9 +814,12 @@
 
         const trigger = entry.trigger_words
           ? `<span class="lora-entry-trigger">trigger: ${esc(entry.trigger_words)}</span>` : "";
-        const badgeLabel = {pony:"Pony", sdxl:"SDXL", flux:"Flux", illustrious:"Illustrious", any:"汎用"}[bm] || bm;
+        const badgeLabels = {pony:"Pony", sdxl:"SDXL", flux:"Flux", illustrious:"Illustrious", any:"汎用"};
+        const badgeLabel = badgeLabels[bm] || bm;
+        const bmOptions = Object.entries(badgeLabels)
+          .map(([v,l]) => `<option value="${v}"${v===bm?" selected":""}>${l}</option>`).join("");
         div.innerHTML = `
-          <span class="lora-badge badge-${bm}">${badgeLabel}</span>
+          <select class="lora-bm-select badge-${bm}" title="モデル種別" data-fn="${esc(entry.filename)}">${bmOptions}</select>
           <span class="lora-entry-name">${esc(entry.filename.replace(/\.safetensors$/i,""))}</span>
           <span class="lora-entry-desc">${esc(entry.description)}</span>
           ${trigger}
@@ -821,6 +834,23 @@
       });
       list.querySelectorAll(".lora-strength-edit").forEach(inp => {
         inp.addEventListener("change", () => updateLoraStrength(inp.dataset.fn, parseFloat(inp.value)));
+      });
+      list.querySelectorAll(".lora-bm-select").forEach(sel => {
+        sel.addEventListener("change", async () => {
+          const bm = sel.value;
+          try {
+            const resp = await fetch("/api/loras/" + encodeURIComponent(sel.dataset.fn), {
+              method: "PATCH",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({base_model: bm}),
+            });
+            const d = await resp.json();
+            if (d.ok) {
+              sel.className = "lora-bm-select badge-" + bm;
+              await loadLoraRegistry();
+            } else { alert("更新失敗: " + (d.error || "")); }
+          } catch (e) { alert("エラー: " + e.message); }
+        });
       });
     } catch {}
   }

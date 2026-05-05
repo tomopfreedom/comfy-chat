@@ -134,6 +134,12 @@ async def handle_loras_patch(request):
             )
         entry["default_strength"] = round(strength, 2)
 
+    if "base_model" in body:
+        bm = body["base_model"]
+        if bm not in ("pony", "sdxl", "flux", "illustrious", "any"):
+            return web.json_response({"ok": False, "error": "無効な base_model です"}, status=400)
+        entry["base_model"] = bm
+
     _save_registry(registry)
     return web.json_response({"ok": True, "entry": entry})
 
