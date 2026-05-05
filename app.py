@@ -11,7 +11,7 @@ import aiohttp
 from aiohttp import web
 
 from pony_utils import (
-    COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX,
+    COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX, ILLUSTRIOUS_QUALITY_PREFIX,
     translate_prompt, submit_image_async, get_checkpoints,
 )
 
@@ -48,15 +48,19 @@ def _ckpt_type(ckpt_name: str) -> str:
         return "pony"
     if "flux" in name:
         return "flux"
+    if "illustrious" in name or "noobai" in name:
+        return "illustrious"
     return "sdxl"
 
 
 def _filter_loras_for_model(registry: list, ckpt_name: str) -> list:
     """選択中チェックポイントと互換性のある LoRA のみ返す。
     base_model が 'any' または一致するモデル種別の LoRA を通過させる。
+    illustrious チェックポイントは sdxl LoRA とも互換（同一 SDXL ベース）。
     """
     ckpt = _ckpt_type(ckpt_name)
-    return [e for e in registry if e.get("base_model", "any") in (ckpt, "any")]
+    allowed = (ckpt, "any") if ckpt != "illustrious" else ("illustrious", "sdxl", "any")
+    return [e for e in registry if e.get("base_model", "any") in allowed]
 
 
 # ──── ハンドラ ────────────────────────────────────────────────────
@@ -92,7 +96,7 @@ async def handle_loras_post(request):
         return web.json_response({"ok": False, "error": "既に登録済みです"}, status=400)
 
     base_model = body.get("base_model", "any")
-    if base_model not in ("pony", "sdxl", "flux", "any"):
+    if base_model not in ("pony", "sdxl", "flux", "illustrious", "any"):
         base_model = "any"
 
     entry = {
@@ -230,9 +234,12 @@ async def handle_generate(request):
         tag_list.extend(t.strip() for t in costume_map[best_token].split(","))
         positive = ", ".join(tag_list)
 
-    # Pony 系モデルは品質タグが必須。LLM が省略した場合もサーバー側で先頭に保証する。
-    if _ckpt_type(checkpoint) == "pony":
+    # モデル種別に応じた品質タグをサーバー側で先頭に保証する。
+    ckpt_kind = _ckpt_type(checkpoint)
+    if ckpt_kind == "pony":
         positive = PONY_QUALITY_PREFIX + ", " + positive
+    elif ckpt_kind == "illustrious":
+        positive = ILLUSTRIOUS_QUALITY_PREFIX + ", " + positive
 
     # トリガーワード付加後、重複タグを除去（大文字小文字・空白を正規化して比較）
     def _dedup_tags(prompt: str) -> str:

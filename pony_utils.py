@@ -11,7 +11,7 @@ from typing import Optional
 
 import aiohttp
 
-from system_prompt import PONY_SYSTEM_PROMPT, SDXL_SYSTEM_PROMPT, FLUX_SYSTEM_PROMPT
+from system_prompt import PONY_SYSTEM_PROMPT, SDXL_SYSTEM_PROMPT, FLUX_SYSTEM_PROMPT, ILLUSTRIOUS_SYSTEM_PROMPT
 
 LLAMA_URL = "http://localhost:11434/v1/chat/completions"
 COMFY_BASE = "http://localhost:8188"
@@ -25,6 +25,7 @@ PONY_QUALITY_PREFIX = (
     "(anime style:1.2), (clear lines:1.2), (simple aesthetic:1.1), "
     "bright lighting, colorful, (depth of field:1.3), detailed eyes"
 )
+ILLUSTRIOUS_QUALITY_PREFIX = "masterpiece, best quality, newest, absurdres, highres"
 POLL_TIMEOUT = 300
 
 
@@ -52,6 +53,8 @@ def _select_system_prompt(ckpt_name: str) -> str:
         return PONY_SYSTEM_PROMPT
     elif "flux" in name:
         return FLUX_SYSTEM_PROMPT
+    elif "illustrious" in name or "noobai" in name:
+        return ILLUSTRIOUS_SYSTEM_PROMPT
     return SDXL_SYSTEM_PROMPT
 
 

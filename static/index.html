@@ -128,10 +128,11 @@
       flex-shrink: 0;
       font-weight: 600;
     }
-    .badge-pony { background: #2a1a3a; color: #c080ff; border: 1px solid #4a2a6a; }
-    .badge-sdxl { background: #1a2a3a; color: #80c0ff; border: 1px solid #2a4a6a; }
-    .badge-flux { background: #1a3a2a; color: #80ffc0; border: 1px solid #2a6a4a; }
-    .badge-any  { background: #2a2a2a; color: #aaaaaa; border: 1px solid #4a4a4a; }
+    .badge-pony        { background: #2a1a3a; color: #c080ff; border: 1px solid #4a2a6a; }
+    .badge-sdxl        { background: #1a2a3a; color: #80c0ff; border: 1px solid #2a4a6a; }
+    .badge-flux        { background: #1a3a2a; color: #80ffc0; border: 1px solid #2a6a4a; }
+    .badge-illustrious { background: #2a1a1a; color: #ff9060; border: 1px solid #6a2a1a; }
+    .badge-any         { background: #2a2a2a; color: #aaaaaa; border: 1px solid #4a4a4a; }
 
     /* 非互換 LoRA をグレーアウト */
     .lora-entry.incompatible { opacity: 0.35; }
@@ -580,10 +581,11 @@
     <label style="font-size:0.72rem;color:#777;white-space:nowrap;align-self:center">強度</label>
     <input id="lora-strength-inp" class="lp-input" type="number"
            value="0.75" min="0.1" max="1.5" step="0.05">
-    <select id="lora-base-model" class="lp-input" style="width:80px">
+    <select id="lora-base-model" class="lp-input" style="width:100px">
       <option value="pony">Pony</option>
       <option value="sdxl">SDXL</option>
       <option value="flux">Flux</option>
+      <option value="illustrious">Illustrious</option>
       <option value="any">汎用</option>
     </select>
     <button id="lora-add-btn">＋ 登録</button>
@@ -744,6 +746,7 @@
     const n = (ckptName || "").toLowerCase();
     if (n.includes("pony")) return "pony";
     if (n.includes("flux")) return "flux";
+    if (n.includes("illustrious") || n.includes("noobai")) return "illustrious";
     return "sdxl";
   }
 
@@ -761,13 +764,14 @@
       registry.forEach(entry => {
         const div = document.createElement("div");
         const bm = entry.base_model || "any";
-        const compatible = bm === "any" || bm === currentType;
+        const compatible = bm === "any" || bm === currentType
+          || (currentType === "illustrious" && bm === "sdxl");
         div.className = "lora-entry" + (compatible ? "" : " incompatible");
         div.dataset.baseModel = bm;
 
         const trigger = entry.trigger_words
           ? `<span class="lora-entry-trigger">trigger: ${esc(entry.trigger_words)}</span>` : "";
-        const badgeLabel = {pony:"Pony", sdxl:"SDXL", flux:"Flux", any:"汎用"}[bm] || bm;
+        const badgeLabel = {pony:"Pony", sdxl:"SDXL", flux:"Flux", illustrious:"Illustrious", any:"汎用"}[bm] || bm;
         div.innerHTML = `
           <span class="lora-badge badge-${bm}">${badgeLabel}</span>
           <span class="lora-entry-name">${esc(entry.filename.replace(/\.safetensors$/i,""))}</span>
