@@ -120,6 +120,18 @@
       flex-shrink: 0;
     }
     .lora-del-btn:hover { background: #2a1010; }
+    .lora-strength-edit {
+      width: 46px;
+      background: #1a1a2e;
+      border: 1px solid #333355;
+      color: #8899bb;
+      font-size: 0.72rem;
+      padding: 2px 4px;
+      border-radius: 3px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .lora-strength-edit:focus { border-color: #5566aa; outline: none; color: #ccd; }
 
     .lora-badge {
       font-size: 0.65rem;
@@ -777,14 +789,32 @@
           <span class="lora-entry-name">${esc(entry.filename.replace(/\.safetensors$/i,""))}</span>
           <span class="lora-entry-desc">${esc(entry.description)}</span>
           ${trigger}
-          <span class="lora-entry-trigger">×${entry.default_strength}</span>
+          <input class="lora-strength-edit" type="number" title="倍率"
+                 value="${entry.default_strength}" min="0.1" max="2.0" step="0.05"
+                 data-fn="${esc(entry.filename)}">
           <button class="lora-del-btn" data-fn="${esc(entry.filename)}">削除</button>`;
         list.appendChild(div);
       });
       list.querySelectorAll(".lora-del-btn").forEach(btn => {
         btn.addEventListener("click", () => deleteLora(btn.dataset.fn));
       });
+      list.querySelectorAll(".lora-strength-edit").forEach(inp => {
+        inp.addEventListener("change", () => updateLoraStrength(inp.dataset.fn, parseFloat(inp.value)));
+      });
     } catch {}
+  }
+
+  async function updateLoraStrength(filename, strength) {
+    if (isNaN(strength)) return;
+    try {
+      const resp = await fetch("/api/loras/" + encodeURIComponent(filename), {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({default_strength: strength}),
+      });
+      const d = await resp.json();
+      if (!d.ok) alert("倍率の更新に失敗: " + (d.error || ""));
+    } catch (e) { alert("エラー: " + e.message); }
   }
 
   // チェックポイント変更時にパネルが開いていれば互換性表示を更新

@@ -111,6 +111,33 @@ async def handle_loras_post(request):
     return web.json_response({"ok": True, "entry": entry})
 
 
+async def handle_loras_patch(request):
+    filename = request.match_info["filename"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    registry = request.app["lora_registry"]
+    entry = next((e for e in registry if e["filename"] == filename), None)
+    if entry is None:
+        return web.json_response({"ok": False, "error": "見つかりません"}, status=404)
+
+    if "default_strength" in body:
+        try:
+            strength = float(body["default_strength"])
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "無効な値です"}, status=400)
+        if not 0.1 <= strength <= 2.0:
+            return web.json_response(
+                {"ok": False, "error": "強度は 0.1〜2.0 の範囲で指定してください"}, status=400
+            )
+        entry["default_strength"] = round(strength, 2)
+
+    _save_registry(registry)
+    return web.json_response({"ok": True, "entry": entry})
+
+
 async def handle_loras_delete(request):
     filename = request.match_info["filename"]
     registry = request.app["lora_registry"]
@@ -383,6 +410,7 @@ def main():
     app.router.add_get("/api/checkpoints",       handle_checkpoints)
     app.router.add_get("/api/loras",             handle_loras_get)
     app.router.add_post("/api/loras",            handle_loras_post)
+    app.router.add_patch("/api/loras/{filename}",  handle_loras_patch)
     app.router.add_delete("/api/loras/{filename}", handle_loras_delete)
     app.router.add_get("/api/lora-files",        handle_lora_files)
     app.router.add_post("/api/generate",         handle_generate)
