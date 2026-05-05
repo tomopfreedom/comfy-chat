@@ -185,6 +185,8 @@ async def handle_generate(request):
     init_image       = body.get("init_image") or None
     mask_image       = body.get("mask_image") or None
     denoise_strength = float(body.get("denoise", 0.75))
+    sampler_name = body.get("sampler", "euler_ancestral")
+    scheduler    = body.get("scheduler", "karras")
     if seed == -1:
         seed = random.randint(0, 2**32 - 1)
 
@@ -288,6 +290,7 @@ async def handle_generate(request):
             hires_fix=hires_fix, adetail=adetail,
             init_image=init_image, denoise_strength=denoise_strength,
             mask_image=mask_image,
+            sampler_name=sampler_name, scheduler=scheduler,
         )
     except Exception as e:
         return web.json_response({"ok": False, "error": f"ComfyUI エラー: {e}"})

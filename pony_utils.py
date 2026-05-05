@@ -102,7 +102,9 @@ def _build_workflow(positive: str, negative: str, seed: int,
                     adetail: bool = False,
                     init_image: Optional[str] = None,
                     denoise_strength: float = 0.75,
-                    mask_image: Optional[str] = None) -> dict:
+                    mask_image: Optional[str] = None,
+                    sampler_name: str = "euler_ancestral",
+                    scheduler: str = "karras") -> dict:
     if loras is None:
         loras = []
 
@@ -153,7 +155,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
         "6": {"class_type": "KSampler",
               "inputs": {
                   "seed": seed, "steps": steps, "cfg": cfg,
-                  "sampler_name": "euler_ancestral", "scheduler": "karras",
+                  "sampler_name": sampler_name, "scheduler": scheduler,
                   "denoise": base_denoise, "model": model_src,
                   "positive": ["4", 0], "negative": ["5", 0],
                   "latent_image": latent_src,
@@ -271,7 +273,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
             "class_type": "KSampler",
             "inputs": {
                 "seed": seed, "steps": hires_steps, "cfg": cfg,
-                "sampler_name": "euler_ancestral", "scheduler": "karras",
+                "sampler_name": sampler_name, "scheduler": scheduler,
                 "denoise": 0.45, "model": model_src,
                 "positive": ["4", 0], "negative": ["5", 0],
                 "latent_image": ["12", 0],
@@ -306,8 +308,8 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "seed":           seed,
                 "steps":          adetail_steps,
                 "cfg":            cfg,
-                "sampler_name":   "euler_ancestral",
-                "scheduler":      "karras",
+                "sampler_name":   sampler_name,
+                "scheduler":      scheduler,
                 "positive":       ["4", 0],
                 "negative":       ["5", 0],
                 "denoise":        0.45,
@@ -361,8 +363,8 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "seed":           seed,
                 "steps":          adetail_steps,
                 "cfg":            cfg,
-                "sampler_name":   "euler_ancestral",
-                "scheduler":      "karras",
+                "sampler_name":   sampler_name,
+                "scheduler":      scheduler,
                 "positive":       ["4", 0],
                 "negative":       ["5", 0],
                 "denoise":        0.45,
@@ -427,12 +429,15 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                               adetail: bool = False,
                               init_image: Optional[str] = None,
                               denoise_strength: float = 0.75,
-                              mask_image: Optional[str] = None) -> Optional[dict]:
+                              mask_image: Optional[str] = None,
+                              sampler_name: str = "euler_ancestral",
+                              scheduler: str = "karras") -> Optional[dict]:
     client_id = str(uuid.uuid4())
     workflow = _build_workflow(positive, negative, seed, width, height, steps, cfg,
                                ckpt_name, loras, hires_fix=hires_fix, adetail=adetail,
                                init_image=init_image, denoise_strength=denoise_strength,
-                               mask_image=mask_image)
+                               mask_image=mask_image,
+                               sampler_name=sampler_name, scheduler=scheduler)
 
     async with session.post(
         f"{COMFY_BASE}/prompt",
