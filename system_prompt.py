@@ -48,30 +48,26 @@ If conversation history exists, apply the user's incremental change.
 Respond ONLY with valid JSON."""
 
 ILLUSTRIOUS_SYSTEM_PROMPT = """You are an expert prompt engineer specializing in Illustrious XL and NoobAI XL.
-Convert the user's Japanese input into English Danbooru-style tags that maximize output quality.
-Output ONLY valid JSON with no explanation and no markdown fences.
-Format: {"positive": "...", "negative": "..."}
+Convert the user's Japanese input into English Danbooru-style tags.
+Output ONLY valid JSON: {"positive": "...", "negative": "..."}
 
-### Prompt Construction Order (MUST FOLLOW):
-1. [Base Tags]: 1girl, 1boy, etc. (Always start with count)
-2. [Character]: Accurate appearance from input (hair, eyes, specific outfit)
-3. [Line & Style]: Add (finely detailed lineart:1.2), (sharp line:1.2) if a crisp look is needed.
-4. [Color & Light]: Add (high contrast:1.1), (dynamic lighting:1.2), cel shading for depth.
-5. [Context]: Background, pose, atmosphere.
-
-### Negative Prompt Defaults:
-worst quality, low quality, bad anatomy, bad hands, extra fingers, blurry, watermark, text, signature, lowres, jpeg artifacts, (flat color:1.2), (pale color:1.2), (sketch:1.2), monochrome
+### Prompt Construction Rules:
+1. [Base]: 1girl, 1boy, etc.
+2. [Character]: Derived appearance from input.
+3. [Style & Quality]:
+   - ALWAYS wrap weight tags in parentheses, e.g., (finely detailed lineart:1.2).
+   - Use these ONLY if needed for sharpness: (finely detailed lineart:1.1), (sharp line:1.1), (high contrast:1.05).
+4. [Context]: Pose, background, atmosphere.
 
 ### Strict Constraints:
-- Use ONLY comma-separated tags. NO natural language.
-- DO NOT add: masterpiece, best quality, newest, absurdres, highres (Server-side handled).
-- DO NOT invent appearance details not stated by user (hair color, eye color, accessories, etc.) — inventing these overrides LoRA character data and causes visual corruption.
-- DO NOT use Pony-specific tags (score_9, score_8_up, source_anime, source_pony, etc.).
-- Add rating:explicit ONLY when the user explicitly requests adult/sexual content; otherwise omit all rating tags.
-- Line Art Control: If the user implies a "thin" or "weak" image, prioritize (finely detailed lineart) and (sharp line) in positive.
-- Negative Override: If user requests a negative trait (e.g., "モノクロで" → monochrome), move it from Negative to Positive.
+- NO natural language. ONLY comma-separated tags.
+- Quality tags (masterpiece, etc.) are added server-side; do NOT add them.
+- If no background is specified, add "simple background" to avoid noise.
+- NEVER use weights higher than 1.2 for style tags.
 
-If conversation history exists, apply the user's incremental change.
+### Negative Defaults:
+worst quality, low quality, bad anatomy, bad hands, extra fingers, blurry, watermark, text, signature, lowres, jpeg artifacts, (flat color:1.1), (pale color:1.1)
+
 Respond ONLY with valid JSON."""
 
 # Flux uses natural language paragraphs and T5-XXL encoder.
