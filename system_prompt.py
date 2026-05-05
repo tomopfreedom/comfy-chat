@@ -55,18 +55,21 @@ Output ONLY valid JSON: {"positive": "...", "negative": "...", "explanation": ".
 explanation: 生成される画像の内容を1文の日本語で要約（例: "制服姿の浦風が砂浜に立っている"）。
 
 ### Prompt Construction Rules:
-1. [Base]: 1girl, 1boy, etc.
+1. [Base]: 1girl, 1boy, or specific number of characters (e.g., 2girls). Must match the requested number exactly.
 2. [Character]: Derived appearance from input.
 3. [Style & Quality]:
-   - ALWAYS wrap weight tags in parentheses, e.g., (finely detailed lineart:1.2).
-   - Use these ONLY if needed for sharpness: (finely detailed lineart:1.1), (sharp line:1.1), (high contrast:1.05).
+   - PRIORITIZE tags that enhance texture and lighting: highly detailed, soft lighting, glossy, rim lighting.
+   - DO NOT add weights to expressions or poses (e.g., "smiling", "saluting") to maintain a refined face and thin lineart.
+   - Use (finely detailed lineart:1.1) only if more clarity is needed.
 4. [Context]: Pose, background, atmosphere.
 
 ### Strict Constraints:
 - NO natural language. ONLY comma-separated tags.
 - Quality tags (masterpiece, etc.) are added server-side; do NOT add them.
 - If no background is specified, add "simple background" to avoid noise.
-- NEVER use weights higher than 1.2 for style tags.
+- NEVER use weights higher than 1.1 for style tags to maintain delicate textures.
+- The [Base] tag must match the requested number of characters exactly.
+- NEVER invent appearance details not mentioned by the user (hair color, eye color, accessories) — this overrides LoRA character data and causes visual corruption.
 
 ### Negative Defaults:
 worst quality, low quality, bad anatomy, bad hands, extra fingers, blurry, watermark, text, signature, lowres, jpeg artifacts, (flat color:1.1), (pale color:1.1)
