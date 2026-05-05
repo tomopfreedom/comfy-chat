@@ -587,6 +587,28 @@
       min-height: 38px;
     }
     .confirm-neg-ta:focus { border-color: #7a3a3a; }
+    /* 確認パネル LoRA 選択 */
+    .confirm-lora-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .confirm-lora-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      padding: 3px 5px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+    }
+    .confirm-lora-row:hover { background: #0e200e; }
+    .confirm-lora-check { accent-color: #4a9a4a; cursor: pointer; flex-shrink: 0; }
+    .confirm-lora-name { color: #80c080; font-family: monospace; flex: 1; }
+    .confirm-lora-str  { color: #4a7a4a; font-size: 0.68rem; white-space: nowrap; }
+    .confirm-lora-trigger { color: #3a5a3a; font-size: 0.65rem; padding-left: 20px; line-height: 1.3; word-break: break-all; }
+
     .confirm-actions { display: flex; justify-content: flex-end; margin-top: 2px; }
 
     /* タグ日本語解説チップ */
@@ -1093,7 +1115,7 @@
         return;
       }
 
-      addConfirmMsg(d.positive, d.negative, d.loras, text, d.explanation || "");
+      addConfirmMsg(d.positive, d.negative, d.loras, text, d.explanation || "", d.available_loras || []);
     } catch (e) {
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
@@ -1102,7 +1124,7 @@
   }
 
   // 確認パネルをチャットに追加
-  function addConfirmMsg(positive, negative, loras, originalText, explanation) {
+  function addConfirmMsg(positive, negative, loras, originalText, explanation, availableLoras) {
     const hist = $("chat-history");
     const empty = $("chat-empty");
     if (empty) empty.remove();
@@ -1116,6 +1138,33 @@
     panel.className = "confirm-panel";
     const explanationHtml = explanation
       ? `<div class="confirm-explanation">${esc(explanation)}</div>` : "";
+
+    const selectedNames = new Set((loras || []).map(l => l.name));
+    const positiveLower = positive.toLowerCase();
+    const loraRowsHtml = (availableLoras || []).map(entry => {
+      const llmSelected = selectedNames.has(entry.filename);
+      // trigger_words のいずれかが positive に含まれていれば自動チェック
+      const triggerInPos = (entry.trigger_words || "").split(",").some(t => {
+        const tk = t.trim().toLowerCase();
+        return tk.length > 3 && positiveLower.includes(tk);
+      });
+      const checked = (llmSelected || triggerInPos) ? "checked" : "";
+      const shortName = entry.filename.replace(/\.safetensors$/i, "");
+      const trigger = (entry.trigger_words || "").trim();
+      const triggerHtml = trigger
+        ? `<div class="confirm-lora-trigger">trigger: ${esc(trigger)}</div>` : "";
+      return `<label class="confirm-lora-row">` +
+        `<input type="checkbox" class="confirm-lora-check" ${checked} ` +
+        `data-filename="${esc(entry.filename)}" data-strength="${entry.default_strength || 0.75}" ` +
+        `data-trigger="${esc(trigger)}">` +
+        `<span class="confirm-lora-name">${esc(shortName)}</span>` +
+        `<span class="confirm-lora-str">×${entry.default_strength || 0.75}</span>` +
+        `</label>` + triggerHtml;
+    }).join("");
+    const loraSectionHtml = (availableLoras && availableLoras.length)
+      ? `<div class="confirm-lbl" style="margin-top:4px">使用するLoRA</div>` +
+        `<div class="confirm-lora-section">${loraRowsHtml}</div>` : "";
+
     panel.innerHTML =
       explanationHtml +
       `<div class="confirm-lbl">positive</div>` +
@@ -1123,6 +1172,7 @@
       `<div class="tag-jp-section"><span class="tag-jp-loading">タグを解説中...</span></div>` +
       `<div class="confirm-lbl">negative</div>` +
       `<textarea class="confirm-ta confirm-neg-ta">${esc(negative)}</textarea>` +
+      loraSectionHtml +
       `<div class="confirm-actions">` +
       `<button class="confirm-gen-btn">この内容で生成</button>` +
       `</div>`;
@@ -1176,6 +1226,14 @@
     btn.textContent = "生成中...";
     setGenerating(true);
 
+    // チェックされた LoRA を収集（LoRA セクションが表示されている場合はそちらを権威とする）
+    const loraSection = panel.querySelector(".confirm-lora-section");
+    const checkedLoras = [];
+    panel.querySelectorAll(".confirm-lora-check:checked").forEach(cb => {
+      checkedLoras.push({name: cb.dataset.filename, strength: parseFloat(cb.dataset.strength)});
+    });
+    const effectiveLoras = loraSection ? checkedLoras : loras;
+
     try {
       const d = await fetch("/api/generate", {
         method: "POST",
@@ -1184,7 +1242,7 @@
           message:            originalText,
           confirmed_positive: confirmedPos,
           confirmed_negative: confirmedNeg,
-          loras:              loras,
+          loras:              effectiveLoras,
           checkpoint:         $("checkpoint").value,
           width:              parseInt($("width").value),
           height:             parseInt($("height").value),

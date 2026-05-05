@@ -407,7 +407,7 @@ async def translate_prompt(japanese_text: str, history: list,
         "model": LLM_MODEL,
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 512,
+        "max_tokens": 1024,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     async with session.post(
