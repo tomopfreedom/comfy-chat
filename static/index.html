@@ -539,6 +539,58 @@
     }
     .pchip:hover       { background: #1e1e40; color: #aaaaee; border-color: #4444aa; }
     .pchip.recent-chip { color: #88aacc; border-color: #2a3a4a; }
+
+    /* ── タグ確認パネル ─────────────────────────── */
+    .confirm-panel {
+      border: 1px solid #2a4a2a;
+      border-radius: 7px;
+      padding: 8px 10px;
+      background: #0c1a0c;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      width: 100%;
+    }
+    .confirm-lbl {
+      font-size: 0.63rem;
+      color: #4a6a50;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .confirm-ta {
+      background: #0f180f;
+      border: 1px solid #1e3a1e;
+      color: #90c090;
+      font-family: monospace;
+      font-size: 0.72rem;
+      border-radius: 4px;
+      padding: 5px 7px;
+      resize: vertical;
+      min-height: 54px;
+      width: 100%;
+      line-height: 1.45;
+    }
+    .confirm-ta:focus { outline: none; border-color: #3a7a3a; }
+    .confirm-neg-ta {
+      color: #a08080;
+      border-color: #2a1a1a;
+      background: #160e0e;
+      min-height: 38px;
+    }
+    .confirm-neg-ta:focus { border-color: #7a3a3a; }
+    .confirm-actions { display: flex; justify-content: flex-end; margin-top: 2px; }
+    .confirm-gen-btn {
+      background: #1e3a1e;
+      color: #70ee70;
+      border: 1px solid #3a7a3a;
+      border-radius: 5px;
+      padding: 5px 14px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .confirm-gen-btn:hover:not(:disabled) { background: #2a5a2a; }
+    .confirm-gen-btn:disabled { background: #151e15; color: #3a5a3a; cursor: default; }
   </style>
 </head>
 <body>
@@ -982,7 +1034,7 @@
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
-  // ── 生成実行 ────────────────────────────────────────────────────
+  // ── 生成実行（Step 1: LLM 翻訳 → 確認パネル表示） ──────────────
   async function generate() {
     if (generating) return;
     const text = $("user-input").value.trim();
@@ -992,29 +1044,15 @@
     $("user-input").value = "";
     setGenerating(true);
 
-    const payload = {
-      message:    text,
-      history:    chatHistory.slice(-6),
-      checkpoint: $("checkpoint").value,
-      width:      parseInt($("width").value),
-      height:     parseInt($("height").value),
-      steps:      parseInt($("steps").value),
-      cfg:        parseFloat($("cfg").value),
-      sampler:    $("sampler").value,
-      scheduler:  $("scheduler").value,
-      seed:       parseInt($("seed-input").value) || -1,
-      hires_fix:  $("hires-fix").checked,
-      adetail:    $("adetail").checked,
-      init_image: uploadedImageName || null,
-      mask_image: uploadedMaskName  || null,
-      denoise:    uploadedImageName ? parseFloat($("denoise-slider").value) : 1.0,
-    };
-
     try {
-      const d = await fetch("/api/generate", {
+      const d = await fetch("/api/translate", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          message:    text,
+          history:    chatHistory.slice(-6),
+          checkpoint: $("checkpoint").value,
+        }),
       }).then(r => r.json());
 
       if (!d.ok) {
@@ -1022,26 +1060,108 @@
         return;
       }
 
-      // 会話履歴を更新
-      chatHistory.push({role: "user",      content: text});
+      addConfirmMsg(d.positive, d.negative, d.loras, text);
+    } catch (e) {
+      addMsg("assistant", "⚠ 通信エラー: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // 確認パネルをチャットに追加
+  function addConfirmMsg(positive, negative, loras, originalText) {
+    const hist = $("chat-history");
+    const empty = $("chat-empty");
+    if (empty) empty.remove();
+    const wrap = document.createElement("div");
+    wrap.className = "msg assistant";
+    wrap.style.maxWidth = "100%";
+    const lbl = document.createElement("div");
+    lbl.className = "msg-label";
+    lbl.textContent = "AI プロンプト (確認)";
+    const panel = document.createElement("div");
+    panel.className = "confirm-panel";
+    panel.innerHTML =
+      `<div class="confirm-lbl">positive</div>` +
+      `<textarea class="confirm-ta confirm-pos-ta">${esc(positive)}</textarea>` +
+      `<div class="confirm-lbl">negative</div>` +
+      `<textarea class="confirm-ta confirm-neg-ta">${esc(negative)}</textarea>` +
+      `<div class="confirm-actions">` +
+      `<button class="confirm-gen-btn">この内容で生成</button>` +
+      `</div>`;
+    wrap.appendChild(lbl);
+    wrap.appendChild(panel);
+    hist.appendChild(wrap);
+    hist.scrollTop = hist.scrollHeight;
+    panel.querySelector(".confirm-gen-btn").addEventListener("click", () => {
+      generateFromConfirmed(wrap, panel, loras, originalText);
+    });
+  }
+
+  // Step 2: 確認済みタグで ComfyUI に送信
+  async function generateFromConfirmed(msgDiv, panel, loras, originalText) {
+    if (generating) return;
+    const confirmedPos = panel.querySelector(".confirm-pos-ta").value.trim();
+    const confirmedNeg = panel.querySelector(".confirm-neg-ta").value.trim();
+    const btn = panel.querySelector(".confirm-gen-btn");
+    btn.disabled = true;
+    btn.textContent = "生成中...";
+    setGenerating(true);
+
+    try {
+      const d = await fetch("/api/generate", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          message:            originalText,
+          confirmed_positive: confirmedPos,
+          confirmed_negative: confirmedNeg,
+          loras:              loras,
+          checkpoint:         $("checkpoint").value,
+          width:              parseInt($("width").value),
+          height:             parseInt($("height").value),
+          steps:              parseInt($("steps").value),
+          cfg:                parseFloat($("cfg").value),
+          sampler:            $("sampler").value,
+          scheduler:          $("scheduler").value,
+          seed:               parseInt($("seed-input").value) || -1,
+          hires_fix:          $("hires-fix").checked,
+          adetail:            $("adetail").checked,
+          init_image:         uploadedImageName || null,
+          mask_image:         uploadedMaskName  || null,
+          denoise:            uploadedImageName ? parseFloat($("denoise-slider").value) : 1.0,
+        }),
+      }).then(r => r.json());
+
+      if (!d.ok) {
+        btn.disabled = false;
+        btn.textContent = "この内容で生成";
+        addMsg("assistant", "⚠ " + (d.error || "不明なエラー"));
+        return;
+      }
+
+      chatHistory.push({role: "user",      content: originalText});
       chatHistory.push({role: "assistant", content: d.positive});
-      // 最近の入力を記録（フレーズサジェスト「最近」タブに表示）
-      saveRecentInput(text);
+      saveRecentInput(originalText);
       if (activePcat >= PHRASES.length) renderPhraseChips(activePcat);
 
+      // 確認パネルを生成済みサマリに置換
       const summary = d.positive.length > 80
         ? d.positive.slice(0, 80) + "…" : d.positive;
-      addMsg("assistant", summary);
+      msgDiv.querySelector(".msg-label").textContent = "AI プロンプト";
+      const bodyDiv = document.createElement("div");
+      bodyDiv.textContent = summary;
+      msgDiv.replaceChild(bodyDiv, panel);
 
-      // 画像を表示
       const img = $("preview-img");
       img.onload = () => { img.style.display = "block"; };
       img.src = d.image_url + "&_t=" + Date.now();
 
       showPromptInfo(d.positive, d.negative, d.seed, d.loras);
       $("seed-input").value = d.seed;
-
     } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "この内容で生成";
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
       setGenerating(false);

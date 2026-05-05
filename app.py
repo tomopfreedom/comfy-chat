@@ -41,6 +41,17 @@ def _parse_costume_map(description: str) -> dict:
     return result
 
 
+def _dedup_tags(prompt: str) -> str:
+    seen: set = set()
+    result: list = []
+    for tag in prompt.split(","):
+        key = tag.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(tag.strip())
+    return ", ".join(result)
+
+
 def _ckpt_type(ckpt_name: str) -> str:
     """チェックポイント名からベースモデル種別を返す。"""
     name = ckpt_name.lower()
@@ -61,6 +72,56 @@ def _filter_loras_for_model(registry: list, ckpt_name: str) -> list:
     ckpt = _ckpt_type(ckpt_name)
     allowed = (ckpt, "any") if ckpt != "illustrious" else ("illustrious", "sdxl", "any")
     return [e for e in registry if e.get("base_model", "any") in allowed]
+
+
+def _apply_lora_postprocess(positive: str, selected_loras: list, registry_map: dict, checkpoint: str) -> str:
+    """LoRA のトリガーワード・force_tags・衣装タグ・品質タグを付加し dedup して返す。"""
+    for lora in selected_loras:
+        entry = registry_map.get(lora.get("name", ""))
+        if entry:
+            trigger = entry.get("trigger_words", "").strip()
+            if trigger:
+                positive = trigger + ", " + positive
+
+    for lora in selected_loras:
+        entry = registry_map.get(lora.get("name", ""))
+        if entry:
+            force = entry.get("force_tags", "").strip()
+            if force:
+                positive = force + ", " + positive
+
+    for lora in selected_loras:
+        entry = registry_map.get(lora.get("name", ""))
+        if not entry or "token=" not in entry.get("description", ""):
+            continue
+        costume_map = _parse_costume_map(entry["description"])
+        if not costume_map:
+            continue
+
+        known_lower = {t.lower() for t in costume_map.keys()}
+        tag_list = [t.strip() for t in positive.split(",") if t.strip()]
+        tag_list = [t for t in tag_list if t.lower() not in known_lower]
+
+        positive_set = {t.lower() for t in tag_list}
+        best_token = list(costume_map.keys())[0]
+        best_count = 0
+        for token, tags in costume_map.items():
+            count = sum(1 for t in tags.split(",") if t.strip().lower() in positive_set)
+            if count > best_count:
+                best_count = count
+                best_token = token
+
+        tag_list.append(best_token)
+        tag_list.extend(t.strip() for t in costume_map[best_token].split(","))
+        positive = ", ".join(tag_list)
+
+    ckpt_kind = _ckpt_type(checkpoint)
+    if ckpt_kind == "pony":
+        positive = PONY_QUALITY_PREFIX + ", " + positive
+    elif ckpt_kind == "illustrious":
+        positive = ILLUSTRIOUS_QUALITY_PREFIX + ", " + positive
+
+    return _dedup_tags(positive)
 
 
 # ──── ハンドラ ────────────────────────────────────────────────────
@@ -169,6 +230,47 @@ async def handle_lora_files(request):
     return web.json_response({"files": files})
 
 
+async def handle_translate(request):
+    """LLM 翻訳 + LoRA 後処理のみ実行し、ユーザー確認用タグを返す。ComfyUI へは送信しない。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    japanese_text = body.get("message", "").strip()
+    if not japanese_text:
+        return web.json_response({"ok": False, "error": "メッセージが空です"}, status=400)
+
+    history    = body.get("history", [])
+    checkpoint = body.get("checkpoint", "ponyDiffusionV6XL_v6StartWithThisOne.safetensors")
+    session    = request.app["session"]
+    registry   = _filter_loras_for_model(request.app["lora_registry"], checkpoint)
+
+    try:
+        prompt_data = await translate_prompt(
+            japanese_text, history, checkpoint, session, registry
+        )
+    except Exception as e:
+        return web.json_response({"ok": False, "error": f"LLM エラー: {e}"})
+
+    positive = prompt_data.get("positive", "")
+    negative = prompt_data.get("negative", "")
+    valid_names = {e["filename"] for e in registry}
+    selected_loras = [
+        l for l in prompt_data.get("loras", [])
+        if isinstance(l, dict) and l.get("name") in valid_names
+    ]
+    registry_map = {e["filename"]: e for e in registry}
+    positive = _apply_lora_postprocess(positive, selected_loras, registry_map, checkpoint)
+
+    return web.json_response({
+        "ok":       True,
+        "positive": positive,
+        "negative": negative,
+        "loras":    selected_loras,
+    })
+
+
 async def handle_generate(request):
     try:
         body = await request.json()
@@ -200,94 +302,34 @@ async def handle_generate(request):
     # 選択中チェックポイントと互換性のある LoRA のみ LLM に渡す
     registry = _filter_loras_for_model(request.app["lora_registry"], checkpoint)
 
-    try:
-        prompt_data = await translate_prompt(
-            japanese_text, history, checkpoint, session, registry
-        )
-    except Exception as e:
-        return web.json_response({"ok": False, "error": f"LLM エラー: {e}"})
-
-    positive = prompt_data.get("positive", "")
-    negative = prompt_data.get("negative", "")
-
-    # LLM が選んだ LoRA をレジストリのホワイトリストで検証
-    raw_loras = prompt_data.get("loras", [])
+    confirmed_positive = body.get("confirmed_positive")
+    confirmed_negative = body.get("confirmed_negative")
     valid_names = {e["filename"] for e in registry}
-    selected_loras = [
-        l for l in raw_loras
-        if isinstance(l, dict) and l.get("name") in valid_names
-    ]
 
-    # 選択された LoRA のトリガーワードをサーバー側で positive に付加
-    # LLM は活性化トークン（atagokc 等）を知らないため、機械的に挿入する
-    registry_map = {e["filename"]: e for e in registry}
-    for lora in selected_loras:
-        entry = registry_map.get(lora.get("name", ""))
-        if entry:
-            trigger = entry.get("trigger_words", "").strip()
-            if trigger:
-                positive = trigger + ", " + positive
+    if confirmed_positive is not None:
+        # ユーザーが確認・編集済みのタグをそのまま使用（LLM・LoRA後処理を再実行しない）
+        positive = _dedup_tags(str(confirmed_positive))
+        negative = str(confirmed_negative or "")
+        selected_loras = [
+            l for l in body.get("loras", [])
+            if isinstance(l, dict) and l.get("name") in valid_names
+        ]
+    else:
+        try:
+            prompt_data = await translate_prompt(
+                japanese_text, history, checkpoint, session, registry
+            )
+        except Exception as e:
+            return web.json_response({"ok": False, "error": f"LLM エラー: {e}"})
 
-    # force_tags: LoRA が必須とするタグを強制付加（LLM が無視しても確実に入る）
-    # 例: pussy_juice_tail → rating:explicit
-    for lora in selected_loras:
-        entry = registry_map.get(lora.get("name", ""))
-        if entry:
-            force = entry.get("force_tags", "").strip()
-            if force:
-                positive = force + ", " + positive
-
-    # 衣装・状況トークンをサーバー側で確定する。
-    # LLM のトークン選択は信頼しない（任意文字列は LLM の語彙にないため誤りやすい）。
-    # 方式:
-    #   1. LLM 出力から全ての既知トークンを除去（誤トークンも取り除く）
-    #   2. 残ったコンテンツタグと各衣装の tags= をマッチングし最多一致の衣装を選択
-    #   3. 選択した衣装のトークン + 全タグを付加（dedup で重複除去）
-    #   4. マッチゼロの場合は description の先頭衣装をデフォルト適用
-    for lora in selected_loras:
-        entry = registry_map.get(lora.get("name", ""))
-        if not entry or "token=" not in entry.get("description", ""):
-            continue
-        costume_map = _parse_costume_map(entry["description"])
-        if not costume_map:
-            continue
-
-        known_lower = {t.lower() for t in costume_map.keys()}
-        tag_list = [t.strip() for t in positive.split(",") if t.strip()]
-        tag_list = [t for t in tag_list if t.lower() not in known_lower]
-
-        positive_set = {t.lower() for t in tag_list}
-        best_token = list(costume_map.keys())[0]
-        best_count = 0
-        for token, tags in costume_map.items():
-            count = sum(1 for t in tags.split(",") if t.strip().lower() in positive_set)
-            if count > best_count:
-                best_count = count
-                best_token = token
-
-        tag_list.append(best_token)
-        tag_list.extend(t.strip() for t in costume_map[best_token].split(","))
-        positive = ", ".join(tag_list)
-
-    # モデル種別に応じた品質タグをサーバー側で先頭に保証する。
-    ckpt_kind = _ckpt_type(checkpoint)
-    if ckpt_kind == "pony":
-        positive = PONY_QUALITY_PREFIX + ", " + positive
-    elif ckpt_kind == "illustrious":
-        positive = ILLUSTRIOUS_QUALITY_PREFIX + ", " + positive
-
-    # トリガーワード付加後、重複タグを除去（大文字小文字・空白を正規化して比較）
-    def _dedup_tags(prompt: str) -> str:
-        seen: set = set()
-        result: list = []
-        for tag in prompt.split(","):
-            key = tag.strip().lower()
-            if key and key not in seen:
-                seen.add(key)
-                result.append(tag.strip())
-        return ", ".join(result)
-
-    positive = _dedup_tags(positive)
+        positive = prompt_data.get("positive", "")
+        negative = prompt_data.get("negative", "")
+        selected_loras = [
+            l for l in prompt_data.get("loras", [])
+            if isinstance(l, dict) and l.get("name") in valid_names
+        ]
+        registry_map = {e["filename"]: e for e in registry}
+        positive = _apply_lora_postprocess(positive, selected_loras, registry_map, checkpoint)
 
     try:
         img_info = await submit_image_async(
@@ -422,6 +464,7 @@ def main():
     app.router.add_patch("/api/loras/{filename}",  handle_loras_patch)
     app.router.add_delete("/api/loras/{filename}", handle_loras_delete)
     app.router.add_get("/api/lora-files",        handle_lora_files)
+    app.router.add_post("/api/translate",         handle_translate)
     app.router.add_post("/api/generate",         handle_generate)
     app.router.add_post("/api/upload",           handle_upload)
     app.router.add_get("/api/image",             handle_image)
