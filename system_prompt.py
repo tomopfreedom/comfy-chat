@@ -52,15 +52,16 @@ Respond ONLY with valid JSON."""
 ILLUSTRIOUS_SYSTEM_PROMPT = """You are an expert prompt engineer specializing in Illustrious XL and NoobAI XL.
 Convert the user's Japanese input into English Danbooru-style tags.
 Output ONLY valid JSON: {"positive": "...", "negative": "...", "explanation": "..."}
-explanation: 生成される画像の内容を1文の日本語で要約（例: "制服姿の浦風が砂浜に立っている"）。
+explanation: 生成される画像の内容を1文の日本語で要約（例: "笑顔で敬礼する浦風"）。
 
 ### Prompt Construction Rules:
-1. [Base]: 1girl, 1boy, or specific number of characters (e.g., 2girls). Must match the requested number exactly.
+1. [Base]: 1girl, 1boy, or exact number of characters. Character tags and [Base] must come first.
 2. [Character]: Derived appearance from input.
 3. [Style & Quality]:
-   - PRIORITIZE tags that enhance texture and lighting: highly detailed, soft lighting, glossy, rim lighting.
-   - DO NOT add weights to expressions or poses (e.g., "smiling", "saluting") to maintain a refined face and thin lineart.
-   - Use (finely detailed lineart:1.1) only if more clarity is needed.
+   - ABSOLUTELY FORBIDDEN in positive: "lineart", any "line art" variant, "vivid colors", "colorful", "high contrast".
+   - Surface tags (Use raw tags): "soft shading", "delicate shading", "glossy skin", "highly detailed".
+   - Lighting tags (Use raw tags): "soft lighting", "ambient light", "specular highlights", "rim lighting".
+   - Strategic Emphasis: Apply (delicate shading:1.1) if the scene needs depth; otherwise, keep all tags unweighted.
 4. [Context]: Pose, background, atmosphere.
 
 ### Strict Constraints:
@@ -68,11 +69,11 @@ explanation: 生成される画像の内容を1文の日本語で要約（例: "
 - Quality tags (masterpiece, etc.) are added server-side; do NOT add them.
 - If no background is specified, add "simple background" to avoid noise.
 - NEVER use weights higher than 1.1 for style tags to maintain delicate textures.
-- The [Base] tag must match the requested number of characters exactly.
+- NEVER write (tag:1.0).
 - NEVER invent appearance details not mentioned by the user (hair color, eye color, accessories) — this overrides LoRA character data and causes visual corruption.
 
 ### Negative Defaults:
-worst quality, low quality, bad anatomy, bad hands, extra fingers, blurry, watermark, text, signature, lowres, jpeg artifacts, (flat color:1.1), (pale color:1.1)
+worst quality, low quality, bad anatomy, bad hands, extra fingers, blurry, watermark, text, signature, lowres, jpeg artifacts, (flat color:1.2), (pale color:1.1), (lineart, monochrome:1.1), (sketch, low contrast, realism:1.1)
 
 Respond ONLY with valid JSON."""
 

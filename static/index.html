@@ -653,31 +653,31 @@
 <header id="header">
   <h1>🎨 ComfyUI Chat</h1>
 
-  <label>モデル</label>
-  <select id="checkpoint"><option value="">読み込み中...</option></select>
+  <label title="使用するチェックポイントモデル。Pony / SDXL / Illustrious でプロンプト形式と品質タグが自動切り替わる">モデル</label>
+  <select id="checkpoint" title="使用するチェックポイントモデル。Pony / SDXL / Illustrious でプロンプト形式と品質タグが自動切り替わる"><option value="">読み込み中...</option></select>
 
-  <label>幅</label>
-  <select id="width">
+  <label title="生成画像の横幅（ピクセル）。SDXL 系は 1024 が標準">幅</label>
+  <select id="width" title="生成画像の横幅（ピクセル）。SDXL 系は 1024 が標準">
     <option value="832">832</option>
     <option value="1024" selected>1024</option>
     <option value="1216">1216</option>
   </select>
 
-  <label>高さ</label>
-  <select id="height">
+  <label title="生成画像の縦幅（ピクセル）。SDXL 系は 1024 が標準">高さ</label>
+  <select id="height" title="生成画像の縦幅（ピクセル）。SDXL 系は 1024 が標準">
     <option value="832">832</option>
     <option value="1024" selected>1024</option>
     <option value="1216">1216</option>
   </select>
 
-  <label>Steps</label>
-  <input type="number" id="steps" value="25" min="10" max="50" style="width:50px">
+  <label title="サンプリングステップ数。多いほど高品質だが生成時間が増える（推奨: 20〜30）">Steps</label>
+  <input type="number" id="steps" value="25" min="10" max="50" style="width:50px" title="サンプリングステップ数。多いほど高品質だが生成時間が増える（推奨: 20〜30）">
 
-  <label>CFG</label>
-  <input type="number" id="cfg" value="7" min="1" max="20" step="0.5" style="width:50px">
+  <label title="プロンプト忠実度（Classifier-Free Guidance）。高いほどプロンプトに強く従い、低いほど自由な表現になる（推奨: 5〜9）">CFG</label>
+  <input type="number" id="cfg" value="7" min="1" max="20" step="0.5" style="width:50px" title="プロンプト忠実度（Classifier-Free Guidance）。高いほどプロンプトに強く従い、低いほど自由な表現になる（推奨: 5〜9）">
 
-  <label>Sampler</label>
-  <select id="sampler" style="font-size:0.72rem">
+  <label title="ノイズ除去アルゴリズム。Euler a はアニメ系に安定・多様性あり、DPM++ 2M は高品質でシャープ">Sampler</label>
+  <select id="sampler" style="font-size:0.72rem" title="ノイズ除去アルゴリズム。Euler a はアニメ系に安定・多様性あり、DPM++ 2M は高品質でシャープ">
     <option value="euler_ancestral">Euler a</option>
     <option value="euler">Euler</option>
     <option value="dpmpp_2m">DPM++ 2M</option>
@@ -688,8 +688,8 @@
     <option value="lcm">LCM</option>
   </select>
 
-  <label>Schedule</label>
-  <select id="scheduler" style="font-size:0.72rem">
+  <label title="ノイズスケジューリング方式。Karras は段階的にノイズを減らし多くの場合で安定した高品質">Schedule</label>
+  <select id="scheduler" style="font-size:0.72rem" title="ノイズスケジューリング方式。Karras は段階的にノイズを減らし多くの場合で安定した高品質">
     <option value="karras">Karras</option>
     <option value="normal">Normal</option>
     <option value="exponential">Exponential</option>
@@ -697,12 +697,12 @@
     <option value="simple">Simple</option>
   </select>
 
-  <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer" title="低解像度で生成後に 2x アップスケールして再サンプリング。ディテールが向上するが生成時間が約2倍になる">
     <input type="checkbox" id="hires-fix" style="accent-color:#6666cc">
     <span style="font-size:0.72rem;color:#aaa">Hires fix</span>
   </label>
 
-  <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer" title="顔・手を自動検出して再インペイント。顔崩れや指の破綻を修正する（生成時間が増加）">
     <input type="checkbox" id="adetail" style="accent-color:#66aa66">
     <span style="font-size:0.72rem;color:#aaa">ADetail</span>
   </label>
@@ -1345,6 +1345,8 @@
     if (fav.cfg        !== undefined) $("cfg").value           = fav.cfg;
     $("hires-fix").checked = !!fav.hires_fix;
     $("adetail").checked   = !!fav.adetail;
+    if (fav.sampler    !== undefined) $("sampler").value    = fav.sampler;
+    if (fav.scheduler  !== undefined) $("scheduler").value  = fav.scheduler;
     if ($("lora-panel").classList.contains("open")) loadLoraRegistry();
   }
 
@@ -1367,6 +1369,8 @@
       cfg:        $("cfg").value,
       hires_fix:  $("hires-fix").checked,
       adetail:    $("adetail").checked,
+      sampler:    $("sampler").value,
+      scheduler:  $("scheduler").value,
     };
     saveFavorites([...getFavorites(), fav]);
     $("fav-name-inp").value = "";
