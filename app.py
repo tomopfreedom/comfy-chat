@@ -12,7 +12,7 @@ from aiohttp import web
 
 from pony_utils import (
     COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX, ILLUSTRIOUS_QUALITY_PREFIX,
-    translate_prompt, submit_image_async, get_checkpoints,
+    translate_prompt, explain_tags, submit_image_async, get_checkpoints,
 )
 
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
@@ -228,6 +228,25 @@ async def handle_lora_files(request):
     except Exception:
         files = []
     return web.json_response({"files": files})
+
+
+async def handle_explain_tags(request):
+    """ポジティブタグを LLM で日本語解説してチップ用データを返す。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    positive = body.get("positive", "").strip()
+    if not positive:
+        return web.json_response({"ok": True, "tags": []})
+
+    try:
+        tags = await explain_tags(positive, request.app["session"])
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+    return web.json_response({"ok": True, "tags": tags})
 
 
 async def handle_translate(request):
@@ -465,6 +484,7 @@ def main():
     app.router.add_patch("/api/loras/{filename}",  handle_loras_patch)
     app.router.add_delete("/api/loras/{filename}", handle_loras_delete)
     app.router.add_get("/api/lora-files",        handle_lora_files)
+    app.router.add_post("/api/explain-tags",       handle_explain_tags)
     app.router.add_post("/api/translate",         handle_translate)
     app.router.add_post("/api/generate",         handle_generate)
     app.router.add_post("/api/upload",           handle_upload)

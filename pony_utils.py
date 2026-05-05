@@ -420,6 +420,36 @@ async def translate_prompt(japanese_text: str, history: list,
     return _extract_json(raw)
 
 
+_EXPLAIN_TAGS_SYS = (
+    "Stable Diffusion プロンプトタグを日本語で解説します。\n"
+    'Output ONLY valid JSON: {"tags": [{"en": "tag", "jp": "日本語"}, ...]}\n'
+    "品質タグ（score_9, score_8_up, score_7_up, masterpiece, best quality, newest, absurdres, "
+    "highres, source_anime, source_pony, rating:explicit, 1girl, 1boy 等）は除外してください。\n"
+    "各タグを簡潔な日本語（2〜10文字）で説明してください。"
+)
+
+
+async def explain_tags(positive: str, session: aiohttp.ClientSession) -> list:
+    """ポジティブタグを日本語解説付きリストで返す。品質・汎用タグは除外する。"""
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": _EXPLAIN_TAGS_SYS},
+            {"role": "user",   "content": f"タグ: {positive}"},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 800,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    async with session.post(
+        LLAMA_URL, json=payload,
+        timeout=aiohttp.ClientTimeout(total=60),
+    ) as resp:
+        data = await resp.json(content_type=None)
+    raw = data["choices"][0]["message"]["content"]
+    return _extract_json(raw).get("tags", [])
+
+
 async def submit_image_async(positive: str, negative: str, seed: int,
                               width: int, height: int, steps: int, cfg: float,
                               ckpt_name: str,

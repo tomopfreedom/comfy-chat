@@ -588,6 +588,30 @@
     }
     .confirm-neg-ta:focus { border-color: #7a3a3a; }
     .confirm-actions { display: flex; justify-content: flex-end; margin-top: 2px; }
+
+    /* タグ日本語解説チップ */
+    .tag-jp-section {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      min-height: 20px;
+      margin-top: 3px;
+    }
+    .tag-jp-loading { font-size: 0.65rem; color: #3a5a3a; font-style: italic; align-self: center; }
+    .tag-jp-chip {
+      background: #091509;
+      border: 1px solid #1a3a1a;
+      border-radius: 4px;
+      padding: 2px 6px;
+      display: inline-flex;
+      flex-direction: column;
+      gap: 0;
+      cursor: default;
+    }
+    .tag-jp-chip:hover { border-color: #3a6a3a; background: #0e200e; }
+    .tag-jp-en  { color: #4a7a4a; font-family: monospace; font-size: 0.65rem; line-height: 1.2; }
+    .tag-jp-txt { color: #90cc90; font-size: 0.73rem; line-height: 1.35; }
+
     .confirm-gen-btn {
       background: #1e3a1e;
       color: #70ee70;
@@ -1096,6 +1120,7 @@
       explanationHtml +
       `<div class="confirm-lbl">positive</div>` +
       `<textarea class="confirm-ta confirm-pos-ta">${esc(positive)}</textarea>` +
+      `<div class="tag-jp-section"><span class="tag-jp-loading">タグを解説中...</span></div>` +
       `<div class="confirm-lbl">negative</div>` +
       `<textarea class="confirm-ta confirm-neg-ta">${esc(negative)}</textarea>` +
       `<div class="confirm-actions">` +
@@ -1119,6 +1144,26 @@
     panel.querySelector(".confirm-gen-btn").addEventListener("click", () => {
       generateFromConfirmed(wrap, panel, loras, originalText);
     });
+
+    // タグ日本語解説を非同期で取得（確認パネル表示後にバックグラウンド実行）
+    const tagSection = panel.querySelector(".tag-jp-section");
+    fetch("/api/explain-tags", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({positive}),
+    }).then(r => r.json()).then(d => {
+      if (!d.ok || !d.tags || !d.tags.length) {
+        tagSection.innerHTML = "";
+        return;
+      }
+      tagSection.innerHTML = d.tags.map(t =>
+        `<span class="tag-jp-chip">` +
+        `<span class="tag-jp-en">${esc(t.en)}</span>` +
+        `<span class="tag-jp-txt">${esc(t.jp)}</span>` +
+        `</span>`
+      ).join("");
+      hist.scrollTop = hist.scrollHeight;
+    }).catch(() => { tagSection.innerHTML = ""; });
   }
 
   // Step 2: 確認済みタグで ComfyUI に送信
