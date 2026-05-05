@@ -161,11 +161,24 @@ def _build_workflow(positive: str, negative: str, seed: int,
               "inputs": {"images": save_image_src, "filename_prefix": "comfy_chat/auto"}},
     }
 
-    # txt2img: EmptyLatentImage / img2img: LoadImage + VAEEncode
+    # txt2img: EmptyLatentImage / img2img: LoadImage → ImageScale → VAEEncode
+    # ImageScale (node 35/36) で width×height にリサイズ:
+    #   - 大画像による VRAM 不足を防ぐ
+    #   - 出力サイズを UI 指定値に統一する（VAEEncode は入力画像サイズで latent を作るため）
     if init_image:
         workflow["30"] = {
             "class_type": "LoadImage",
             "inputs": {"image": init_image, "upload": "image"},
+        }
+        workflow["35"] = {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image":          ["30", 0],
+                "upscale_method": "lanczos",
+                "width":           width,
+                "height":          height,
+                "crop":            "disabled",
+            },
         }
         if mask_image:
             # インペイント: mask を ImageToMask に通して VAEEncodeForInpaint へ
@@ -173,14 +186,24 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "class_type": "LoadImage",
                 "inputs": {"image": mask_image, "upload": "image"},
             }
+            workflow["36"] = {
+                "class_type": "ImageScale",
+                "inputs": {
+                    "image":          ["32", 0],
+                    "upscale_method": "lanczos",
+                    "width":           width,
+                    "height":          height,
+                    "crop":            "disabled",
+                },
+            }
             workflow["33"] = {
                 "class_type": "ImageToMask",
-                "inputs": {"image": ["32", 0], "channel": "red"},
+                "inputs": {"image": ["36", 0], "channel": "red"},
             }
             workflow["34"] = {
                 "class_type": "VAEEncodeForInpaint",
                 "inputs": {
-                    "pixels":       ["30", 0],
+                    "pixels":       ["35", 0],
                     "vae":          ["3", 0],
                     "mask":         ["33", 0],
                     "grow_mask_by": 6,
@@ -189,7 +212,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
         else:
             workflow["31"] = {
                 "class_type": "VAEEncode",
-                "inputs": {"pixels": ["30", 0], "vae": ["3", 0]},
+                "inputs": {"pixels": ["35", 0], "vae": ["3", 0]},
             }
     else:
         workflow["2"] = {
@@ -414,6 +437,21 @@ async def submit_image_async(positive: str, negative: str, seed: int,
         timeout=aiohttp.ClientTimeout(total=30),
     ) as resp:
         data = await resp.json(content_type=None)
+
+    if "prompt_id" not in data:
+        # ワークフロー検証エラー: node_errors から詳細を取り出す
+        err = data.get("error", {})
+        node_errors = data.get("node_errors", {})
+        msg = err.get("details") or err.get("message", "validation error")
+        for ne in node_errors.values():
+            for e in ne.get("errors", []):
+                detail = e.get("details", "")
+                if detail:
+                    msg = detail
+                    break
+            break
+        raise ValueError(f"ワークフロー検証エラー: {msg}")
+
     prompt_id = data["prompt_id"]
 
     deadline = time.monotonic() + POLL_TIMEOUT
@@ -424,15 +462,23 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                 f"{COMFY_BASE}/history/{prompt_id}",
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
-                history = await resp.json(content_type=None)
+                hist = await resp.json(content_type=None)
         except Exception:
             continue
-        if prompt_id not in history:
+        if prompt_id not in hist:
             continue
-        outputs = history[prompt_id].get("outputs", {})
-        images = outputs.get("8", {}).get("images", [])
+        entry = hist[prompt_id]
+        status = entry.get("status", {})
+        if status.get("status_str") == "error":
+            for msg in status.get("messages", []):
+                if msg[0] == "execution_error" and isinstance(msg[1], dict):
+                    exc = msg[1].get("exception_message", "不明")
+                    node_type = msg[1].get("node_type", "")
+                    raise ValueError(f"実行エラー ({node_type}): {exc}")
+            raise ValueError("ComfyUI実行エラー（詳細不明）")
+        images = entry.get("outputs", {}).get("8", {}).get("images", [])
         if images:
             return images[0]  # {"filename": "...", "subfolder": "...", "type": "output"}
-        return None  # ノード完了だが画像なし（想定外）
+        return None  # 完了したが画像なし（予期しない）
 
     return None  # タイムアウト

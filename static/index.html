@@ -665,6 +665,25 @@
   </div>
 </main>
 
+<!-- マスク編集モーダル -->
+<div id="mask-modal">
+  <div id="mask-modal-header">
+    <span id="mask-modal-title">✏️ マスク編集 — 再生成したい部分を塗ってください</span>
+    <div class="mask-ctrl-group">
+      <span class="mask-ctrl-label">ブラシ</span>
+      <input type="range" id="brush-size" min="5" max="100" value="30">
+      <span id="brush-size-val">30</span>
+    </div>
+    <button id="eraser-btn">消しゴム</button>
+    <button id="mask-clear-btn">クリア</button>
+    <button id="mask-cancel-btn">キャンセル</button>
+    <button id="mask-apply-btn">確定</button>
+  </div>
+  <div id="mask-canvas-wrapper">
+    <canvas id="display-canvas"></canvas>
+  </div>
+</div>
+
 <script>
   const $ = id => document.getElementById(id);
 
@@ -1268,24 +1287,6 @@
 
   buildPhraseTabs();
 </script>
-<!-- マスク編集モーダル -->
-<div id="mask-modal">
-  <div id="mask-modal-header">
-    <span id="mask-modal-title">✏️ マスク編集 — 再生成したい部分を塗ってください</span>
-    <div class="mask-ctrl-group">
-      <span class="mask-ctrl-label">ブラシ</span>
-      <input type="range" id="brush-size" min="5" max="100" value="30">
-      <span id="brush-size-val">30</span>
-    </div>
-    <button id="eraser-btn">消しゴム</button>
-    <button id="mask-clear-btn">クリア</button>
-    <button id="mask-cancel-btn">キャンセル</button>
-    <button id="mask-apply-btn">確定</button>
-  </div>
-  <div id="mask-canvas-wrapper">
-    <canvas id="display-canvas"></canvas>
-  </div>
-</div>
 
 </body>
 </html>

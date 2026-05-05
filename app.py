@@ -259,7 +259,7 @@ async def handle_generate(request):
         return web.json_response({"ok": False, "error": f"ComfyUI エラー: {e}"})
 
     if img_info is None:
-        return web.json_response({"ok": False, "error": "画像生成タイムアウト（300秒）"})
+        return web.json_response({"ok": False, "error": "画像生成タイムアウト（300秒経過）"})
 
     filename  = img_info.get("filename", "")
     subfolder = img_info.get("subfolder", "")
