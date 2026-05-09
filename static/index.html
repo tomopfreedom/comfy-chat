@@ -64,6 +64,23 @@
     #lora-toggle-btn:hover { background: #243024; }
     #lora-toggle-btn.active { background: #2a4a2a; border-color: #4a8a4a; }
 
+    #aspect-btns {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+    }
+    .aspect-btn {
+      background: #1a1a2a;
+      color: #8888cc;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 3px 7px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .aspect-btn:hover { background: #222244; border-color: #4444aa; }
+
     #health {
       margin-left: auto;
       display: flex;
@@ -658,17 +675,29 @@
 
   <label title="生成画像の横幅（ピクセル）。SDXL 系は 1024 が標準">幅</label>
   <select id="width" title="生成画像の横幅（ピクセル）。SDXL 系は 1024 が標準">
+    <option value="768">768</option>
     <option value="832">832</option>
     <option value="1024" selected>1024</option>
+    <option value="1152">1152</option>
     <option value="1216">1216</option>
   </select>
 
   <label title="生成画像の縦幅（ピクセル）。SDXL 系は 1024 が標準">高さ</label>
   <select id="height" title="生成画像の縦幅（ピクセル）。SDXL 系は 1024 が標準">
+    <option value="768">768</option>
     <option value="832">832</option>
     <option value="1024" selected>1024</option>
+    <option value="1152">1152</option>
     <option value="1216">1216</option>
   </select>
+
+  <div id="aspect-btns" title="よく使うアスペクト比をワンクリックで設定">
+    <button class="aspect-btn" data-w="1024" data-h="1024">1:1</button>
+    <button class="aspect-btn" data-w="768"  data-h="1024">3:4</button>
+    <button class="aspect-btn" data-w="1024" data-h="768" >4:3</button>
+    <button class="aspect-btn" data-w="768"  data-h="1152">9:16</button>
+    <button class="aspect-btn" data-w="1152" data-h="768" >16:9</button>
+  </div>
 
   <label title="サンプリングステップ数。多いほど高品質だが生成時間が増える（推奨: 20〜30）">Steps</label>
   <input type="number" id="steps" value="25" min="10" max="50" style="width:50px" title="サンプリングステップ数。多いほど高品質だが生成時間が増える（推奨: 20〜30）">
@@ -1022,6 +1051,14 @@
       await loadLoraRegistry();
     } catch (e) { alert("エラー: " + e.message); }
   }
+
+  // アスペクト比ボタン
+  document.querySelectorAll(".aspect-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $("width").value  = btn.dataset.w;
+      $("height").value = btn.dataset.h;
+    });
+  });
 
   // LoRA パネル トグル
   $("lora-toggle-btn").addEventListener("click", () => {
