@@ -685,6 +685,7 @@ async def handle_civitai_download(request: web.Request) -> web.Response:
             "base_model":       base_model,
         })
         _save_registry(registry)
+        request.app["lora_registry"] = registry
         reg_note = "trigger_words は Civitai 公開情報から自動取得。LoRA管理画面で確認・編集を推奨。"
 
     return web.json_response({
