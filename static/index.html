@@ -792,10 +792,44 @@
       border-top: 1px solid #2a2a4a;
       padding-top: 14px;
     }
+    #civitai-url-row {
+      display: flex;
+      gap: 6px;
+      margin: 6px 0 4px;
+    }
+    #civitai-url-inp {
+      flex: 1;
+      background: #0f0f1a;
+      color: #d0d0e0;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 0.80rem;
+    }
+    #civitai-url-inp:focus { outline: none; border-color: #5555aa; }
+    #civitai-url-btn {
+      background: #1a1a3a;
+      color: #8888cc;
+      border: 1px solid #2a2a5a;
+      border-radius: 4px;
+      padding: 5px 14px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #civitai-url-btn:hover:not(:disabled) { background: #252555; }
+    #civitai-url-btn:disabled { opacity: 0.5; cursor: default; }
+    .civitai-or-sep {
+      font-size: 0.68rem;
+      color: #334;
+      text-align: center;
+      margin: 6px 0 4px;
+      user-select: none;
+    }
     #civitai-search-row {
       display: flex;
       gap: 6px;
-      margin: 8px 0 10px;
+      margin: 4px 0 10px;
     }
     #civitai-query {
       flex: 1;
@@ -1096,8 +1130,14 @@
 
   <!-- Civitai 検索 -->
   <div id="civitai-section">
-    <div class="page-section-title">🔍 Civitai で LoRA を検索</div>
-    <p style="font-size:0.72rem;color:#446;margin-bottom:4px">キーワード（英語推奨）で Civitai から LoRA を検索してダウンロード・登録できます</p>
+    <div class="page-section-title">🔍 Civitai で LoRA を取得</div>
+    <p style="font-size:0.72rem;color:#446;margin-bottom:4px">URL または モデルID を直接貼り付けるか、キーワードで検索してダウンロード・登録できます</p>
+    <div id="civitai-url-row">
+      <input id="civitai-url-inp" type="text"
+             placeholder="URL または モデルID（例: https://civitai.red/models/2599434/... または 2599434）">
+      <button id="civitai-url-btn">取得</button>
+    </div>
+    <div class="civitai-or-sep">──────── または キーワード検索 ────────</div>
     <div id="civitai-search-row">
       <select id="civitai-domain" title="検索するサイト（.red は NSFW コンテンツを含む）"
               style="background:#0f0f1a;color:#8888cc;border:1px solid #2a2a4a;border-radius:4px;padding:5px 6px;font-size:0.78rem;cursor:pointer;flex-shrink:0">
@@ -2129,6 +2169,48 @@
   window.addEventListener("hashchange", () => activatePage(location.hash));
   activatePage(location.hash);
 
+  // ── Civitai URL / ID 直接取得 ─────────────────────────────────────
+  async function civitaiModelById() {
+    const raw = $("civitai-url-inp").value.trim();
+    if (!raw) return;
+
+    let modelId, domain;
+    const urlMatch = raw.match(/civitai\.(com|red)\/models\/(\d+)/);
+    if (urlMatch) {
+      domain  = `civitai.${urlMatch[1]}`;
+      modelId = urlMatch[2];
+    } else if (/^\d+$/.test(raw)) {
+      modelId = raw;
+      domain  = $("civitai-domain").value;
+    } else {
+      $("civitai-status").textContent = "URL またはモデルID（数字）を入力してください";
+      return;
+    }
+
+    const btn = $("civitai-url-btn");
+    btn.disabled = true;
+    btn.textContent = "取得中...";
+    $("civitai-status").textContent = "";
+    $("civitai-results").innerHTML = "";
+
+    try {
+      const d = await fetch(
+        `/api/civitai/model?id=${modelId}&domain=${encodeURIComponent(domain)}`
+      ).then(r => r.json());
+      if (!d.ok) {
+        $("civitai-status").textContent = "エラー: " + (d.error || "不明");
+        return;
+      }
+      $("civitai-status").textContent = `取得しました（${domain}）`;
+      renderCivitaiResults([d.result], domain);
+    } catch (e) {
+      $("civitai-status").textContent = "通信エラー: " + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "取得";
+    }
+  }
+
   // ── Civitai 検索 ──────────────────────────────────────────────────
   async function civitaiSearch() {
     const query  = $("civitai-query").value.trim();
@@ -2234,6 +2316,10 @@
     }
   }
 
+  $("civitai-url-btn").addEventListener("click", civitaiModelById);
+  $("civitai-url-inp").addEventListener("keydown", e => {
+    if (e.key === "Enter") civitaiModelById();
+  });
   $("civitai-search-btn").addEventListener("click", civitaiSearch);
   $("civitai-query").addEventListener("keydown", e => {
     if (e.key === "Enter") civitaiSearch();

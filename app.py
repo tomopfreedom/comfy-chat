@@ -543,24 +543,50 @@ async def handle_civitai_search(request: web.Request) -> web.Response:
     except Exception as e:
         return web.json_response({"ok": False, "error": f"ネットワークエラー: {e}"}, status=502)
 
-    results = []
-    for m in data.get("items", []):
-        ver = (m.get("modelVersions") or [{}])[0]
-        images = ver.get("images", [])
-        preview_url = images[0]["url"] if images else None
-        results.append({
-            "id":           m["id"],
-            "name":         m["name"],
-            "rating":       round(m.get("stats", {}).get("rating", 0), 1),
-            "downloads":    m.get("stats", {}).get("downloadCount", 0),
-            "base_model":   _civitai_map_base(ver.get("baseModel", "")),
-            "trigger_words": ", ".join(ver.get("trainedWords", [])),
-            "version_id":   ver.get("id"),
-            "version_name": ver.get("name", ""),
-            "preview_url":  preview_url,
-            "model_url":    f"https://civitai.com/models/{m['id']}",
-        })
+    results = [_civitai_model_to_dict(m) for m in data.get("items", [])]
     return web.json_response({"ok": True, "results": results})
+
+
+def _civitai_model_to_dict(m: dict) -> dict:
+    ver    = (m.get("modelVersions") or [{}])[0]
+    images = ver.get("images", [])
+    return {
+        "id":           m["id"],
+        "name":         m.get("name", ""),
+        "rating":       round(m.get("stats", {}).get("rating", 0), 1),
+        "downloads":    m.get("stats", {}).get("downloadCount", 0),
+        "base_model":   _civitai_map_base(ver.get("baseModel", "")),
+        "trigger_words": ", ".join(ver.get("trainedWords", [])),
+        "version_id":   ver.get("id"),
+        "version_name": ver.get("name", ""),
+        "preview_url":  images[0]["url"] if images else None,
+        "model_url":    f"https://civitai.com/models/{m['id']}",
+    }
+
+
+async def handle_civitai_model(request: web.Request) -> web.Response:
+    model_id = request.rel_url.query.get("id", "").strip()
+    domain   = request.rel_url.query.get("domain", "civitai.com")
+    if domain not in ("civitai.com", "civitai.red"):
+        domain = "civitai.com"
+    if not model_id.isdigit():
+        return web.json_response({"ok": False, "error": "id パラメータ（数字）が必要です"}, status=400)
+
+    url = f"https://{domain}/api/v1/models/{model_id}"
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(
+                url, headers=_civitai_headers(),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    return web.json_response(
+                        {"ok": False, "error": f"Civitai API エラー: {resp.status}"}, status=502)
+                m = await resp.json(content_type=None)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": f"ネットワークエラー: {e}"}, status=502)
+
+    return web.json_response({"ok": True, "result": _civitai_model_to_dict(m)})
 
 
 async def handle_civitai_download(request: web.Request) -> web.Response:
@@ -695,6 +721,7 @@ def main():
     app.router.add_get("/api/health",            handle_health)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
+    app.router.add_get("/api/civitai/model",     handle_civitai_model)
     app.router.add_post("/api/civitai/download", handle_civitai_download)
 
     print(f"ComfyUI Chat → http://localhost:{args.port}")
