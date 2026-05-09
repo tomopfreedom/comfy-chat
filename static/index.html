@@ -761,6 +761,14 @@
     }
     .confirm-gen-btn:hover:not(:disabled) { background: #2a5a2a; }
     .confirm-gen-btn:disabled { background: #151e15; color: #3a5a3a; cursor: default; }
+
+    /* WebSocket 進捗バー */
+    .gen-prog-bg   { background: #1a1a2a; border-radius: 3px; overflow: hidden; height: 5px; margin-top: 7px; display: none; }
+    .gen-prog-fill { width: 0%; height: 100%; background: #6666cc; transition: width 0.15s; }
+    .gen-prog-txt  { font-size: 0.65rem; color: #6666aa; text-align: right; margin-top: 2px; }
+
+    /* ネガティブプリセット */
+    #neg-presets { display: flex; align-items: center; gap: 5px; border-left: 1px solid #333; padding-left: 8px; }
   </style>
 </head>
 <body>
@@ -833,6 +841,22 @@
     <input type="checkbox" id="adetail" style="accent-color:#66aa66">
     <span style="font-size:0.72rem;color:#aaa">ADetail</span>
   </label>
+
+  <div id="neg-presets" title="ネガティブプロンプトにプリセットタグを自動追加">
+    <span style="font-size:0.68rem;color:#777">Neg:</span>
+    <label style="display:flex;align-items:center;gap:3px;cursor:pointer" title="顔崩れ防止タグを追加">
+      <input type="checkbox" id="neg-face" style="accent-color:#cc6666">
+      <span style="font-size:0.68rem;color:#aaa">顔</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:3px;cursor:pointer" title="品質向上（低品質除外）タグを追加">
+      <input type="checkbox" id="neg-quality" style="accent-color:#cc6666">
+      <span style="font-size:0.68rem;color:#aaa">品質</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:3px;cursor:pointer" title="手崩れ防止タグを追加">
+      <input type="checkbox" id="neg-hands" style="accent-color:#cc6666">
+      <span style="font-size:0.68rem;color:#aaa">手</span>
+    </label>
+  </div>
 
   <button id="lora-toggle-btn">🧩 LoRA 管理</button>
   <button id="fav-toggle-btn">⭐ お気に入り</button>
@@ -1380,6 +1404,36 @@
     btn.textContent = "生成中...";
     setGenerating(true);
 
+    const clientId = crypto.randomUUID();
+    const negPresets = [];
+    if ($("neg-face")    && $("neg-face").checked)    negPresets.push("顔崩れ防止");
+    if ($("neg-quality") && $("neg-quality").checked)  negPresets.push("品質向上");
+    if ($("neg-hands")   && $("neg-hands").checked)    negPresets.push("手崩れ防止");
+
+    const progWrap = document.createElement("div");
+    progWrap.innerHTML =
+      `<div class="gen-prog-bg"><div class="gen-prog-fill"></div></div>` +
+      `<div class="gen-prog-txt"></div>`;
+    panel.querySelector(".confirm-actions").insertAdjacentElement("afterend", progWrap);
+
+    let ws = null;
+    try {
+      ws = new WebSocket(`ws://localhost:8188/ws?clientId=${clientId}`);
+      ws.onmessage = evt => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type === "progress" && msg.data) {
+            const { value, max } = msg.data;
+            if (max > 0) {
+              progWrap.querySelector(".gen-prog-bg").style.display = "block";
+              progWrap.querySelector(".gen-prog-fill").style.width = (value / max * 100) + "%";
+              progWrap.querySelector(".gen-prog-txt").textContent = `${value} / ${max} step`;
+            }
+          }
+        } catch {}
+      };
+    } catch {}
+
     // チェックされた LoRA を収集（LoRA セクションが表示されている場合はそちらを権威とする）
     const loraSection = panel.querySelector(".confirm-lora-section");
     const checkedLoras = [];
@@ -1411,6 +1465,8 @@
           seed:               parseInt($("seed-input").value) || -1,
           hires_fix:          $("hires-fix").checked,
           adetail:            $("adetail").checked,
+          client_id:          clientId,
+          negative_presets:   negPresets,
           init_image:         uploadedImageName || null,
           mask_image:         uploadedMaskName  || null,
           denoise:            uploadedImageName ? parseFloat($("denoise-slider").value) : 1.0,
@@ -1469,6 +1525,7 @@
       btn.textContent = "この内容で生成";
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
+      if (ws) { try { ws.close(); } catch {} }
       setGenerating(false);
     }
   }
