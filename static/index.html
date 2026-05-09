@@ -399,6 +399,7 @@
     }
     .fav-entry:hover { background: #252545; }
     .fav-name { color: #c0a040; }
+    .fav-prompt { color: #8888aa; font-size: 0.68rem; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fav-meta { color: #555; font-size: 0.65rem; }
     .fav-del {
       background: none;
@@ -1597,8 +1598,12 @@
       div.className = "fav-entry";
       const ckpt = (fav.checkpoint || "?").replace(/\.safetensors$/i, "");
       const ckptShort = ckpt.length > 22 ? ckpt.slice(0, 22) + "…" : ckpt;
+      const msgPreview = fav.message
+        ? esc(fav.message.slice(0, 40)) + (fav.message.length > 40 ? "…" : "")
+        : "";
       div.innerHTML = `
         <span class="fav-name">${esc(fav.name)}</span>
+        ${msgPreview ? `<span class="fav-prompt">${msgPreview}</span>` : ""}
         <span class="fav-meta">${esc(ckptShort)} ${fav.width}×${fav.height}</span>
         <button class="fav-del" title="削除">✕</button>`;
       div.addEventListener("click", e => {
