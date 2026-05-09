@@ -758,10 +758,34 @@
     .confirm-gen-btn:hover:not(:disabled) { background: #2a5a2a; }
     .confirm-gen-btn:disabled { background: #151e15; color: #3a5a3a; cursor: default; }
 
-    /* WebSocket 進捗バー */
-    .gen-prog-bg   { background: #1a1a2a; border-radius: 3px; overflow: hidden; height: 5px; margin-top: 7px; display: none; }
-    .gen-prog-fill { width: 0%; height: 100%; background: #6666cc; transition: width 0.15s; }
-    .gen-prog-txt  { font-size: 0.65rem; color: #6666aa; text-align: right; margin-top: 2px; }
+    /* WebSocket 進捗バー（チャット欄上部固定） */
+    #gen-progress-wrap {
+      display: none;
+      padding: 6px 12px 5px;
+      background: #0b0b1a;
+      border-bottom: 1px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+    #gen-prog-bar-bg {
+      background: #1a1a2e;
+      border-radius: 4px;
+      overflow: hidden;
+      height: 8px;
+    }
+    #gen-prog-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #3a3a99, #6666cc);
+      transition: width 0.2s ease;
+      border-radius: 4px;
+    }
+    #gen-prog-txt {
+      display: block;
+      font-size: 0.67rem;
+      color: #5566aa;
+      text-align: right;
+      margin-top: 3px;
+    }
 
     /* ネガティブプリセット */
     #neg-presets { display: flex; align-items: center; gap: 5px; border-left: 1px solid #333; padding-left: 8px; }
@@ -1049,6 +1073,10 @@
   <main id="main">
     <!-- チャットパネル -->
     <div id="chat-panel">
+      <div id="gen-progress-wrap">
+        <div id="gen-prog-bar-bg"><div id="gen-prog-bar"></div></div>
+        <span id="gen-prog-txt"></span>
+      </div>
       <div id="chat-history">
         <div id="chat-empty">
           日本語で画像の内容を入力してください<br>
@@ -1632,11 +1660,9 @@
     if ($("neg-quality") && $("neg-quality").checked)  negPresets.push("品質向上");
     if ($("neg-hands")   && $("neg-hands").checked)    negPresets.push("手崩れ防止");
 
-    const progWrap = document.createElement("div");
-    progWrap.innerHTML =
-      `<div class="gen-prog-bg"><div class="gen-prog-fill"></div></div>` +
-      `<div class="gen-prog-txt"></div>`;
-    panel.querySelector(".confirm-actions").insertAdjacentElement("afterend", progWrap);
+    const progWrap = $("gen-progress-wrap");
+    const progBar  = $("gen-prog-bar");
+    const progTxt  = $("gen-prog-txt");
 
     let ws = null;
     try {
@@ -1647,9 +1673,9 @@
           if (msg.type === "progress" && msg.data) {
             const { value, max } = msg.data;
             if (max > 0) {
-              progWrap.querySelector(".gen-prog-bg").style.display = "block";
-              progWrap.querySelector(".gen-prog-fill").style.width = (value / max * 100) + "%";
-              progWrap.querySelector(".gen-prog-txt").textContent = `${value} / ${max} step`;
+              progWrap.style.display = "block";
+              progBar.style.width    = (value / max * 100) + "%";
+              progTxt.textContent    = `${value} / ${max} ステップ`;
             }
           }
         } catch {}
@@ -1748,6 +1774,9 @@
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
       if (ws) { try { ws.close(); } catch {} }
+      progWrap.style.display = "none";
+      progBar.style.width    = "0%";
+      progTxt.textContent    = "";
       setGenerating(false);
     }
   }
