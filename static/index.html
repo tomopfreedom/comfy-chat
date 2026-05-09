@@ -2194,9 +2194,14 @@
     $("civitai-results").innerHTML = "";
 
     try {
-      const d = await fetch(
+      const resp = await fetch(
         `/api/civitai/model?id=${modelId}&domain=${encodeURIComponent(domain)}`
-      ).then(r => r.json());
+      );
+      if (!resp.ok) {
+        $("civitai-status").textContent = `エラー: HTTP ${resp.status}`;
+        return;
+      }
+      const d = await resp.json();
       if (!d.ok) {
         $("civitai-status").textContent = "エラー: " + (d.error || "不明");
         return;
@@ -2225,9 +2230,14 @@
     $("civitai-results").innerHTML = "";
 
     try {
-      const d = await fetch(
+      const resp = await fetch(
         `/api/civitai/search?query=${encodeURIComponent(query)}&limit=${limit}&domain=${encodeURIComponent(domain)}&tag=${encodeURIComponent(tag)}`
-      ).then(r => r.json());
+      );
+      if (!resp.ok) {
+        $("civitai-status").textContent = `エラー: HTTP ${resp.status}`;
+        return;
+      }
+      const d = await resp.json();
       if (!d.ok) {
         $("civitai-status").textContent = "エラー: " + (d.error || "不明");
         return;
