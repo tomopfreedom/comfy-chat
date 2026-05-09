@@ -314,6 +314,25 @@
     .pi-val.loras { color: #80c080; font-family: monospace; }
     #pi-empty { color: #2a2a4a; font-size: 0.78rem; }
 
+    #image-actions {
+      display: none;
+      gap: 8px;
+      padding: 6px 10px;
+      border-top: 1px solid #1e1e3a;
+      background: #080814;
+      flex-shrink: 0;
+    }
+    #image-actions button {
+      background: #12122a;
+      color: #8888bb;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+    #image-actions button:hover { background: #1a1a3a; border-color: #5555aa; color: #aaaaee; }
+
     /* ── お気に入りパネル ────────────────────────── */
     #fav-toggle-btn {
       background: #2a251a;
@@ -840,6 +859,11 @@
       <img id="preview-img" alt="生成画像">
     </div>
 
+    <div id="image-actions" style="display:none">
+      <button id="img-download-btn">⬇ ダウンロード</button>
+      <button id="img-copy-btn">📋 シード＋プロンプトをコピー</button>
+    </div>
+
     <div id="prompt-info">
       <span id="pi-empty">プロンプト情報がここに表示されます</span>
     </div>
@@ -868,8 +892,12 @@
 <script>
   const $ = id => document.getElementById(id);
 
-  let chatHistory = [];
-  let generating  = false;
+  let chatHistory    = [];
+  let generating     = false;
+  let lastImageUrl   = null;
+  let lastSeed       = null;
+  let lastPositive   = "";
+  let lastNegative   = "";
 
   // ── ヘルスチェック ──────────────────────────────────────────────
   async function checkHealth() {
@@ -1316,8 +1344,16 @@
       bodyDiv.textContent = summary;
       msgDiv.replaceChild(bodyDiv, panel);
 
+      lastImageUrl = d.image_url;
+      lastSeed     = d.seed;
+      lastPositive = d.positive;
+      lastNegative = d.negative;
+
       const img = $("preview-img");
-      img.onload = () => { img.style.display = "block"; };
+      img.onload = () => {
+        img.style.display = "block";
+        $("image-actions").style.display = "flex";
+      };
       img.src = d.image_url + "&_t=" + Date.now();
 
       showPromptInfo(d.positive, d.negative, d.seed, d.loras);
@@ -1334,6 +1370,35 @@
   $("generate-btn").addEventListener("click", generate);
   $("user-input").addEventListener("keydown", e => {
     if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); generate(); }
+  });
+
+  // ── 画像ダウンロード・共有 ───────────────────────────────────────
+  $("img-download-btn").addEventListener("click", async () => {
+    if (!lastImageUrl) return;
+    const now = new Date();
+    const ts  = now.getFullYear().toString()
+      + String(now.getMonth()+1).padStart(2,"0")
+      + String(now.getDate()).padStart(2,"0") + "_"
+      + String(now.getHours()).padStart(2,"0")
+      + String(now.getMinutes()).padStart(2,"0")
+      + String(now.getSeconds()).padStart(2,"0");
+    const filename = `comfy_${ts}_seed${lastSeed}.png`;
+    const blob = await fetch(lastImageUrl).then(r => r.blob());
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement("a"), { href: url, download: filename });
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  $("img-copy-btn").addEventListener("click", () => {
+    if (!lastSeed) return;
+    const text = `seed: ${lastSeed}\npositive: ${lastPositive}\nnegative: ${lastNegative}`;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = $("img-copy-btn");
+      const orig = btn.textContent;
+      btn.textContent = "✓ コピーしました";
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    });
   });
 
   // ── お気に入り ──────────────────────────────────────────────────
