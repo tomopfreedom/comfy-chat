@@ -221,6 +221,11 @@ async def handle_loras_patch(request):
     if entry is None:
         return web.json_response({"ok": False, "error": "見つかりません"}, status=404)
 
+    if "description" in body:
+        desc = body["description"].strip()
+        if desc:
+            entry["description"] = desc
+
     if "default_strength" in body:
         try:
             strength = float(body["default_strength"])

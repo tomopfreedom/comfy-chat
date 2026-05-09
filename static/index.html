@@ -107,7 +107,24 @@
       font-size: 0.78rem;
     }
     .lora-entry-name { color: #a0c0a0; font-family: monospace; flex-shrink: 0; }
-    .lora-entry-desc { color: #888; flex: 1; }
+    .lora-desc-edit {
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      border-bottom: 1px dashed #2a2a4a;
+      color: #888;
+      font-size: inherit;
+      font-family: inherit;
+      padding: 1px 3px;
+      cursor: text;
+    }
+    .lora-desc-edit:focus {
+      outline: none;
+      border-bottom-color: #5555aa;
+      color: #b0b0cc;
+      background: #0d0d1e;
+    }
     .lora-entry-trigger { color: #6688aa; font-size: 0.7rem; white-space: nowrap; }
     .lora-del-btn {
       background: none;
@@ -1296,7 +1313,11 @@
         div.innerHTML = `
           <select class="lora-bm-select badge-${bm}" title="モデル種別" data-fn="${esc(entry.filename)}">${bmOptions}</select>
           <span class="lora-entry-name">${esc(entry.filename.replace(/\.safetensors$/i,""))}</span>
-          <span class="lora-entry-desc">${esc(entry.description)}</span>
+          <input class="lora-desc-edit" type="text"
+                 value="${esc(entry.description)}"
+                 data-fn="${esc(entry.filename)}"
+                 data-orig="${esc(entry.description)}"
+                 title="クリックして説明を編集（フォーカスを外すと自動保存）">
           ${trigger}
           <input class="lora-strength-edit" type="number" title="倍率"
                  value="${entry.default_strength}" min="0.1" max="2.0" step="0.05"
@@ -1306,6 +1327,20 @@
       });
       list.querySelectorAll(".lora-del-btn").forEach(btn => {
         btn.addEventListener("click", () => deleteLora(btn.dataset.fn));
+      });
+      list.querySelectorAll(".lora-desc-edit").forEach(inp => {
+        inp.addEventListener("blur", async () => {
+          const desc = inp.value.trim();
+          if (!desc || desc === inp.dataset.orig) return;
+          try {
+            const r = await fetch("/api/loras/" + encodeURIComponent(inp.dataset.fn), {
+              method: "PATCH",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({description: desc}),
+            });
+            if ((await r.json()).ok) inp.dataset.orig = desc;
+          } catch {}
+        });
       });
       list.querySelectorAll(".lora-strength-edit").forEach(inp => {
         inp.addEventListener("change", () => updateLoraStrength(inp.dataset.fn, parseFloat(inp.value)));
