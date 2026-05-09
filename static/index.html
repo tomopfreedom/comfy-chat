@@ -412,6 +412,84 @@
     .fav-del:hover { color: #cc5555; }
     #fav-empty { color: #3a3a5a; font-size: 0.8rem; }
 
+    /* ── 生成履歴パネル ─────────────────────────── */
+    #hist-toggle-btn {
+      background: #1a1a2e;
+      color: #8888cc;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #hist-toggle-btn:hover { background: #22223a; }
+    #hist-toggle-btn.active { background: #22223a; border-color: #5555aa; }
+
+    #history-panel {
+      display: none;
+      background: #0d0d1a;
+      border-bottom: 1px solid #2a2a4a;
+      padding: 8px 14px;
+      flex-shrink: 0;
+    }
+    #history-panel.open { display: block; }
+
+    #history-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 0.78rem;
+      color: #556;
+    }
+    #history-clear-btn {
+      background: none;
+      border: 1px solid #3a2a2a;
+      color: #885555;
+      border-radius: 3px;
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    #history-clear-btn:hover { background: #2a1a1a; color: #cc7777; }
+
+    #history-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .hist-entry {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      cursor: pointer;
+      border: 1px solid #2a2a4a;
+      border-radius: 5px;
+      padding: 4px;
+      background: #111128;
+      transition: border-color 0.1s;
+    }
+    .hist-entry:hover { border-color: #5555aa; background: #1a1a38; }
+    .hist-thumb {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 3px;
+      display: block;
+    }
+    .hist-meta {
+      font-size: 0.62rem;
+      color: #556;
+      width: 80px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #hist-empty { color: #3a3a5a; font-size: 0.8rem; }
+
     /* ── img2img エリア ──────────────────────────── */
     #img2img-area {
       border: 1px dashed #2a2a4a;
@@ -757,6 +835,7 @@
 
   <button id="lora-toggle-btn">🧩 LoRA 管理</button>
   <button id="fav-toggle-btn">⭐ お気に入り</button>
+  <button id="hist-toggle-btn">📷 履歴</button>
 
   <div id="health">
     <div class="hdot"><div class="dot" id="dot-llm"></div><span>LLM</span></div>
@@ -800,6 +879,15 @@
   <div id="fav-list">
     <span id="fav-empty">保存済みのお気に入りはありません</span>
   </div>
+</div>
+
+<!-- 生成履歴パネル（トグル） -->
+<div id="history-panel">
+  <div id="history-panel-header">
+    <span>生成履歴（<span id="history-count">0</span>件）</span>
+    <button id="history-clear-btn">全て削除</button>
+  </div>
+  <div id="history-grid"></div>
 </div>
 
 <main id="main">
@@ -1299,6 +1387,10 @@
     });
     const effectiveLoras = loraSection ? checkedLoras : loras;
 
+    const genCheckpoint = $("checkpoint").value;
+    const genWidth      = parseInt($("width").value);
+    const genHeight     = parseInt($("height").value);
+
     try {
       const d = await fetch("/api/generate", {
         method: "POST",
@@ -1308,7 +1400,7 @@
           confirmed_positive: confirmedPos,
           confirmed_negative: confirmedNeg,
           loras:              effectiveLoras,
-          checkpoint:         $("checkpoint").value,
+          checkpoint:         genCheckpoint,
           width:              parseInt($("width").value),
           height:             parseInt($("height").value),
           steps:              parseInt($("steps").value),
@@ -1353,6 +1445,19 @@
       img.onload = () => {
         img.style.display = "block";
         $("image-actions").style.display = "flex";
+        addToHistory({
+          id:         Date.now(),
+          seed:       d.seed,
+          positive:   d.positive,
+          negative:   d.negative,
+          image_url:  d.image_url,
+          loras:      d.loras,
+          checkpoint: genCheckpoint,
+          width:      genWidth,
+          height:     genHeight,
+          timestamp:  Date.now(),
+          userMsg:    originalText,
+        });
       };
       img.src = d.image_url + "&_t=" + Date.now();
 
@@ -1399,6 +1504,73 @@
       btn.textContent = "✓ コピーしました";
       setTimeout(() => { btn.textContent = orig; }, 1500);
     });
+  });
+
+  // ── 生成履歴 ────────────────────────────────────────────────────
+  const HIST_KEY  = "comfy_chat_history";
+  const HIST_MAX  = 100;
+
+  function getHistory() {
+    try { return JSON.parse(localStorage.getItem(HIST_KEY) || "[]"); } catch { return []; }
+  }
+  function saveHistoryStore(arr) {
+    localStorage.setItem(HIST_KEY, JSON.stringify(arr));
+  }
+  function addToHistory(entry) {
+    const arr = getHistory();
+    arr.unshift(entry);
+    if (arr.length > HIST_MAX) arr.length = HIST_MAX;
+    saveHistoryStore(arr);
+    renderHistory();
+  }
+  function renderHistory() {
+    const grid  = $("history-grid");
+    const arr   = getHistory();
+    $("history-count").textContent = arr.length;
+    if (!arr.length) {
+      grid.innerHTML = '<span id="hist-empty">まだ生成履歴がありません</span>';
+      return;
+    }
+    grid.innerHTML = arr.map(e => {
+      const ckptShort = (e.checkpoint || "").replace(/\.safetensors$/i, "").slice(0, 14);
+      return `<div class="hist-entry" data-id="${e.id}" title="${esc(e.positive.slice(0,80))}">
+        <img class="hist-thumb" src="${esc(e.image_url)}" loading="lazy">
+        <div class="hist-meta">seed:${e.seed} ${esc(ckptShort)}</div>
+      </div>`;
+    }).join("");
+    grid.querySelectorAll(".hist-entry").forEach(el => {
+      el.addEventListener("click", () => applyHistory(el.dataset.id));
+    });
+  }
+  function applyHistory(id) {
+    const entry = getHistory().find(e => String(e.id) === String(id));
+    if (!entry) return;
+    if (entry.checkpoint) $("checkpoint").value = entry.checkpoint;
+    if (entry.width)  $("width").value  = entry.width;
+    if (entry.height) $("height").value = entry.height;
+    if (entry.seed)   $("seed-input").value = entry.seed;
+    if (entry.userMsg) $("user-input").value = entry.userMsg;
+
+    lastImageUrl = entry.image_url;
+    lastSeed     = entry.seed;
+    lastPositive = entry.positive;
+    lastNegative = entry.negative;
+    const img = $("preview-img");
+    img.onload = () => { img.style.display = "block"; $("image-actions").style.display = "flex"; };
+    img.src = entry.image_url + "&_t=" + Date.now();
+    showPromptInfo(entry.positive, entry.negative, entry.seed, entry.loras || []);
+  }
+
+  $("hist-toggle-btn").addEventListener("click", () => {
+    const panel = $("history-panel");
+    const isOpen = panel.classList.toggle("open");
+    $("hist-toggle-btn").classList.toggle("active", isOpen);
+    if (isOpen) renderHistory();
+  });
+  $("history-clear-btn").addEventListener("click", () => {
+    if (!confirm("生成履歴を全て削除しますか？")) return;
+    saveHistoryStore([]);
+    renderHistory();
   });
 
   // ── お気に入り ──────────────────────────────────────────────────
