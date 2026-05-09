@@ -510,19 +510,25 @@ async def handle_negative_presets(request: web.Request) -> web.Response:
 
 # ──── Civitai ハンドラ ────────────────────────────────────────────
 
+_CIVITAI_TAGS = {"character", "style", "concept", "clothing", "poses", "background"}
+
 async def handle_civitai_search(request: web.Request) -> web.Response:
     query  = request.rel_url.query.get("query", "").strip()
     limit  = min(int(request.rel_url.query.get("limit", 10)), 100)
     domain = request.rel_url.query.get("domain", "civitai.com")
+    tag    = request.rel_url.query.get("tag", "").strip().lower()
     if domain not in ("civitai.com", "civitai.red"):
         domain = "civitai.com"
+    if tag not in _CIVITAI_TAGS:
+        tag = ""
     if not query:
         return web.json_response({"ok": False, "error": "query パラメータが必要です"}, status=400)
 
     base = f"https://{domain}/api/v1"
-    params = urllib.parse.urlencode({
-        "type": "LORA", "query": query, "sort": "Highest Rated", "limit": limit,
-    })
+    api_params: dict = {"type": "LORA", "query": query, "sort": "Highest Rated", "limit": limit}
+    if tag:
+        api_params["tag"] = tag
+    params = urllib.parse.urlencode(api_params)
     url = f"{base}/models?{params}"
     try:
         async with aiohttp.ClientSession() as sess:

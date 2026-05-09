@@ -1104,6 +1104,15 @@
         <option value="civitai.com">civitai.com</option>
         <option value="civitai.red">civitai.red (NSFW)</option>
       </select>
+      <select id="civitai-tag" title="カテゴリ絞り込み"
+              style="background:#0f0f1a;color:#8888cc;border:1px solid #2a2a4a;border-radius:4px;padding:5px 6px;font-size:0.78rem;cursor:pointer;flex-shrink:0">
+        <option value="">すべて</option>
+        <option value="character" selected>キャラクター</option>
+        <option value="style">スタイル</option>
+        <option value="concept">コンセプト</option>
+        <option value="clothing">衣装</option>
+        <option value="poses">ポーズ</option>
+      </select>
       <input id="civitai-query" type="text"
              placeholder="キーワード（例: umamusume, kantai collection）">
       <select id="civitai-limit" title="検索件数"
@@ -2125,6 +2134,7 @@
     const query  = $("civitai-query").value.trim();
     const domain = $("civitai-domain").value;
     const limit  = $("civitai-limit").value;
+    const tag    = $("civitai-tag").value;
     if (!query) return;
     const btn = $("civitai-search-btn");
     btn.disabled = true;
@@ -2134,7 +2144,7 @@
 
     try {
       const d = await fetch(
-        `/api/civitai/search?query=${encodeURIComponent(query)}&limit=${limit}&domain=${encodeURIComponent(domain)}`
+        `/api/civitai/search?query=${encodeURIComponent(query)}&limit=${limit}&domain=${encodeURIComponent(domain)}&tag=${encodeURIComponent(tag)}`
       ).then(r => r.json());
       if (!d.ok) {
         $("civitai-status").textContent = "エラー: " + (d.error || "不明");
