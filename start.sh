@@ -39,6 +39,9 @@ else
   echo "[comfy-chat] ComfyUI 確認済み"
 fi
 
+# ── 既存プロセスを停止 ───────────────────────────────────────────
+pkill -f "python.*app\.py.*--port $PORT" 2>/dev/null && sleep 1 || true
+
 echo "[comfy-chat] Web アプリを起動します: http://localhost:$PORT"
 source ~/infra/comfyui/venv/bin/activate
 exec python "$APP_DIR/app.py" --port $PORT
