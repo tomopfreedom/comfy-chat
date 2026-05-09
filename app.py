@@ -635,6 +635,11 @@ async def handle_civitai_download(request: web.Request) -> web.Response:
     dl_url   = target["downloadUrl"]
     dest     = LORA_DIR / filename
 
+    # API キーをクエリパラメータとして付与（リダイレクト後も有効、ヘッダーは中継で落ちる）
+    if CIVITAI_API_KEY:
+        sep = "&" if "?" in dl_url else "?"
+        dl_url = f"{dl_url}{sep}token={CIVITAI_API_KEY}"
+
     skip = dest.exists()
     if not skip:
         try:
@@ -646,6 +651,13 @@ async def handle_civitai_download(request: web.Request) -> web.Response:
                     if resp.status != 200:
                         return web.json_response(
                             {"ok": False, "error": f"ダウンロード失敗: {resp.status}"}, status=502)
+                    ct = resp.headers.get("Content-Type", "")
+                    if "text/html" in ct:
+                        return web.json_response(
+                            {"ok": False,
+                             "error": "Civitai が HTML を返しました。CIVITAI_API_KEY が未設定か無効です。"
+                                      " export CIVITAI_API_KEY=<your_token> を設定して再起動してください。"},
+                            status=502)
                     with open(dest, "wb") as fp:
                         async for chunk in resp.content.iter_chunked(1024 * 1024):
                             fp.write(chunk)
