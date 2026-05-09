@@ -16,6 +16,12 @@
 - **ADetailer** — 顔（`face_yolov8n.pt`）と手（`hand_yolov8n.pt`）を YOLO で検出し、各領域を個別に再 inpaint
 - **img2img** — 参照画像をドラッグ&ドロップしてアップロード、変化量スライダーで忠実度を調整
 - **インペイント** — Canvas ブラシでマスクを描き、塗った範囲だけを再生成
+- **WebSocket 進捗バー** — ComfyUI の生成ステップをリアルタイムで表示
+- **ネガティブプリセット** — 「顔崩れ防止」「品質向上」「手崩れ防止」チェックボックスでネガティブプロンプトを補完
+- **生成履歴ギャラリー** — 最大 100 件の生成画像・設定を localStorage に保存し、サムネイルクリックで設定を復元
+- **Civitai LoRA 検索** — civitai.com / civitai.red から LoRA を検索・ダウンロード・登録（トリガーワード自動取得）
+- **アスペクト比クイック設定** — 1:1 / 3:4 / 4:3 / 9:16 / 16:9 ボタンで解像度を即時変更
+- **画像ダウンロード** — 生成画像をタイムスタンプ付きファイル名で保存
 - **お気に入り** — チャット入力・モデル・解像度・Steps・CFG などの設定セットを名前付きで保存し復元
 - **フレーズサジェスト** — 構図/ライティング/雰囲気/場所/スタイル 5カテゴリのフレーズチップをクリックして追記、最近の入力も再利用可能
 
@@ -52,14 +58,26 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 
 起動後: http://localhost:9000
 
+## 画面構成
+
+UI は 3 つのタブに分かれている。
+
+| タブ | 内容 |
+|------|------|
+| 🎨 生成 | 画像生成チャット（メイン機能） |
+| 🧩 LoRA 管理 | LoRA の登録・編集・削除・Civitai 検索 |
+| 📷 履歴 | 過去の生成画像ギャラリー |
+
 ## 使い方
 
 ### 画像生成（テキスト → 画像）
 
-1. ヘッダーのセレクターでチェックポイントモデル・解像度・Steps・CFG を設定
-2. 必要に応じて **Hires fix**（高解像度化）・**ADetail**（顔・手修正）をチェック
-3. チャット欄に日本語で内容を入力し「生成」ボタン（または Ctrl+Enter）
-4. 右パネルに画像が表示され、使用されたプロンプト・Seed・LoRA が確認できる
+1. 「🎨 生成」タブを開く
+2. ヘッダーのセレクターでチェックポイントモデル・解像度・Steps・CFG を設定（アスペクト比ボタンで素早く変更可）
+3. 必要に応じて **Hires fix**（高解像度化）・**ADetail**（顔・手修正）をチェック
+4. チャット欄に日本語で内容を入力し「生成」ボタン（または Ctrl+Enter）
+5. 進捗バーで生成状況を確認しながら待機、完了後に右パネルへ画像が表示される
+6. 使用プロンプト・Seed・LoRA が確認できる。「💾 保存」ボタンで画像をダウンロード
 
 | チェックボックス | 効果 | 処理時間増加 |
 |----------------|------|-------------|
@@ -80,9 +98,25 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 4. 「確定」でマスクを適用（ボタンが緑色に変わる）
 5. テキストで指示を書いて生成 — マスク範囲のみが再描画される
 
+### ネガティブプリセット
+
+生成パネル下部のチェックボックスで追加ネガティブプロンプトを選択できる。
+
+| プリセット | 効果 |
+|-----------|------|
+| 顔崩れ防止 | `bad face, asymmetrical face, ...` を追加 |
+| 品質向上 | `blurry, low quality, jpeg artifacts, ...` を追加 |
+| 手崩れ防止 | `bad hands, extra fingers, ...` を追加 |
+
+確認パネルでネガティブプロンプトを直接編集することもできる。
+
+### 生成履歴
+
+「📷 履歴」タブに最新 100 件の生成結果がサムネイルグリッドで表示される。サムネイルをクリックすると「🎨 生成」タブへ移動し、そのときのプロンプト・チェックポイント・全パラメータが復元される。
+
 ### お気に入り
 
-- 「⭐ お気に入り」ボタン → 名前を入力して「★ 保存」で現在の入力・設定を記録
+- 「⭐」ボタン → 名前を入力して「★ 保存」で現在の入力・設定を記録
 - 保存済みの項目をクリックするとチャット入力・モデル・全パラメータが復元される
 - 設定はブラウザの localStorage に保存されるためリロード後も維持される
 
@@ -94,9 +128,22 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 
 ### LoRA の登録
 
-1. 「🧩 LoRA 管理」ボタンをクリック
-2. `~/infra/comfyui/models/loras/` に配置した `.safetensors` ファイルを選択
+「🧩 LoRA 管理」タブで登録・編集・削除ができる。
+
+**手動登録（ローカルファイル）**
+
+1. `~/infra/comfyui/models/loras/` に `.safetensors` を配置
+2. LoRA 管理タブで「ファイルから追加」からファイルを選択
 3. 説明・トリガーワード・強度・ベースモデル種別を入力して登録
+
+**Civitai から検索・ダウンロード**
+
+1. LoRA 管理タブ下部の「Civitai 検索」欄にキーワードを入力
+2. 検索サイト（civitai.com / civitai.red）と件数（10〜100件）を選択して「検索」
+3. 結果カードのサムネイルをクリックすると civitai.com のモデルページを確認できる
+4. 「⬇ DL & 登録」ボタンでダウンロード → `loras.json` に自動登録（トリガーワードは `trainedWords` から自動取得）
+
+> **注**: civitai.red は NSFW コンテンツを含む。API キーが必要な場合は環境変数 `CIVITAI_API_KEY` を設定する。
 
 登録した LoRA は LLM がユーザーの指示を解析して自動選択する。非互換なベースモデルの LoRA は生成時に自動除外され、LLM への選択肢にも現れない。
 
@@ -131,7 +178,7 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 |------|------|
 | `pony` | Pony Diffusion V6 XL など Pony ベースのモデル |
 | `sdxl` | SDXL Base 1.0 など標準 SDXL ベースのモデル |
-| `flux` | Flux.1 ベースのモデル（現在 UI には非表示、将来拡張用） |
+| `flux` | Flux.1 ベースのモデル |
 | `any` | ベースモデルを問わず使用できる LoRA |
 
 ### プロンプト変換の仕組み
@@ -145,10 +192,10 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 #### Pony モデルの positive タグ構成（サーバー側で組み立て）
 
 ```
-[force_tags]       rating:explicit など LoRA 必須タグ
-[trigger_words]    LoRA の外見基本タグ（常時付加）
+[force_tags]           rating:explicit など LoRA 必須タグ
+[trigger_words]        LoRA の外見基本タグ（常時付加）
 [PONY_QUALITY_PREFIX]  score_9, score_8_up, ..., detailed eyes（品質タグ）
-[LLM 出力]         衣装・活性化トークン・状況タグ
+[LLM 出力]             衣装・活性化トークン・状況タグ
 ```
 
 LLM が品質タグを省略した場合もサーバーが先頭に補完する。タグの重複は dedup 処理で除去される。
@@ -162,7 +209,7 @@ comfy-chat/
 ├── system_prompt.py  # モデル別システムプロンプト定数
 ├── loras.json        # LoRA レジストリ（自動生成・更新）
 ├── static/
-│   └── index.html    # シングルファイル Web UI
+│   └── index.html    # シングルファイル Web UI（3タブ構成）
 └── start.sh          # サービス起動チェック → venv → Python 実行
 ```
 
@@ -199,6 +246,9 @@ comfy-chat/
 | `POST` | `/api/loras` | LoRA 登録 |
 | `DELETE` | `/api/loras/{filename}` | LoRA 削除 |
 | `GET` | `/api/lora-files` | `models/loras/` のファイル一覧 |
+| `GET` | `/api/negative-presets` | ネガティブプリセット一覧 |
+| `GET` | `/api/civitai/search` | Civitai LoRA 検索（`query`, `limit`, `domain` パラメータ） |
+| `POST` | `/api/civitai/download` | Civitai LoRA ダウンロード＆自動登録 |
 
 ### POST /api/generate リクエスト形式
 
@@ -216,11 +266,13 @@ comfy-chat/
   "adetail": false,
   "init_image": null,
   "mask_image": null,
-  "denoise": 0.75
+  "denoise": 0.75,
+  "negative_presets": [],
+  "client_id": "uuid-for-websocket-progress"
 }
 ```
 
-`seed: -1` でランダムシード。レスポンスに使用された実際の seed 値が含まれる。`init_image` / `mask_image` は `/api/upload` が返すファイル名を指定する。`mask_image` を指定した場合は img2img ではなくインペイントワークフローが使用される。`denoise` は `init_image` 指定時のみ有効（`mask_image` あり時も同様）。
+`seed: -1` でランダムシード。レスポンスに使用された実際の seed 値が含まれる。`init_image` / `mask_image` は `/api/upload` が返すファイル名を指定する。`mask_image` を指定した場合は img2img ではなくインペイントワークフローが使用される。`denoise` は `init_image` 指定時のみ有効。`client_id` を指定すると `ws://localhost:8188/ws?clientId=<uuid>` 経由で生成進捗をリアルタイム受信できる。
 
 ### POST /api/loras リクエスト形式
 
@@ -234,6 +286,26 @@ comfy-chat/
   "base_model": "pony"
 }
 ```
+
+### GET /api/civitai/search クエリパラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `query` | 必須 | 検索キーワード（英語推奨） |
+| `limit` | 10 | 取得件数（最大 100） |
+| `domain` | `civitai.com` | `civitai.com` または `civitai.red` |
+
+### POST /api/civitai/download リクエスト形式
+
+```json
+{
+  "model_id": 12345,
+  "version_id": 67890,
+  "domain": "civitai.com"
+}
+```
+
+ダウンロード完了後、`~/infra/comfyui/models/loras/` に `.safetensors` を保存し、`loras.json` にトリガーワード・ベースモデル種別を自動登録する。
 
 ## 生成画像の保存先
 
@@ -267,6 +339,12 @@ ls ~/infra/comfyui/custom_nodes/ComfyUI-Impact-Subpack
 ls ~/infra/comfyui/models/ultralytics/bbox/
 # ultralytics がインストールされているか確認
 source ~/infra/comfyui/venv/bin/activate && python -c "import ultralytics"
+```
+
+**Civitai ダウンロードが 401 / 403 で失敗する**
+```bash
+export CIVITAI_API_KEY="your_api_key_here"
+~/projects/comfy-chat/start.sh
 ```
 
 **画像生成がタイムアウトする**
