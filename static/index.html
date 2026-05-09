@@ -51,19 +51,6 @@
     }
     #checkpoint { max-width: 240px; }
 
-    #lora-toggle-btn {
-      background: #1e2a1e;
-      color: #80c080;
-      border: 1px solid #2a4a2a;
-      border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 0.78rem;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    #lora-toggle-btn:hover { background: #243024; }
-    #lora-toggle-btn.active { background: #2a4a2a; border-color: #4a8a4a; }
-
     #aspect-btns {
       display: flex;
       gap: 3px;
@@ -93,15 +80,11 @@
 
     /* ── LoRA 管理パネル ─────────────────────────── */
     #lora-panel {
-      display: none;
       background: #0d0d20;
-      border-bottom: 1px solid #2a2a4a;
       padding: 10px 14px;
-      flex-shrink: 0;
-      max-height: 220px;
-      overflow-y: auto;
+      border-radius: 6px;
+      margin-bottom: 10px;
     }
-    #lora-panel.open { display: block; }
 
     .lp-row {
       display: flex;
@@ -334,13 +317,23 @@
     #image-actions button:hover { background: #1a1a3a; border-color: #5555aa; color: #aaaaee; }
 
     /* ── お気に入りパネル ────────────────────────── */
+    #fav-strip {
+      background: #0a0a18;
+      border-bottom: 1px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+    #fav-strip-top {
+      display: flex;
+      align-items: center;
+      padding: 4px 14px;
+    }
     #fav-toggle-btn {
       background: #2a251a;
       color: #c0a040;
       border: 1px solid #4a3a1a;
       border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 0.78rem;
+      padding: 3px 10px;
+      font-size: 0.75rem;
       cursor: pointer;
       white-space: nowrap;
     }
@@ -350,7 +343,7 @@
     #fav-panel {
       display: none;
       background: #0d0d1a;
-      border-bottom: 1px solid #2a2a4a;
+      border-top: 1px solid #2a2a4a;
       padding: 10px 14px;
       flex-shrink: 0;
     }
@@ -413,36 +406,22 @@
     .fav-del:hover { color: #cc5555; }
     #fav-empty { color: #3a3a5a; font-size: 0.8rem; }
 
-    /* ── 生成履歴パネル ─────────────────────────── */
-    #hist-toggle-btn {
-      background: #1a1a2e;
-      color: #8888cc;
-      border: 1px solid #2a2a4a;
-      border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 0.78rem;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    #hist-toggle-btn:hover { background: #22223a; }
-    #hist-toggle-btn.active { background: #22223a; border-color: #5555aa; }
-
+    /* ── 生成履歴ページ ─────────────────────────── */
     #history-panel {
-      display: none;
-      background: #0d0d1a;
-      border-bottom: 1px solid #2a2a4a;
-      padding: 8px 14px;
-      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
     }
-    #history-panel.open { display: block; }
 
     #history-panel-header {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 8px;
-      font-size: 0.78rem;
-      color: #556;
+      margin-bottom: 10px;
+      font-size: 0.82rem;
+      color: #8888cc;
+      flex-shrink: 0;
     }
     #history-clear-btn {
       background: none;
@@ -458,9 +437,9 @@
     #history-grid {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
-      max-height: 180px;
+      gap: 8px;
       overflow-y: auto;
+      align-content: flex-start;
     }
     .hist-entry {
       display: flex;
@@ -475,8 +454,8 @@
     }
     .hist-entry:hover { border-color: #5555aa; background: #1a1a38; }
     .hist-thumb {
-      width: 80px;
-      height: 80px;
+      width: 110px;
+      height: 110px;
       object-fit: cover;
       border-radius: 3px;
       display: block;
@@ -484,7 +463,7 @@
     .hist-meta {
       font-size: 0.62rem;
       color: #556;
-      width: 80px;
+      width: 110px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -769,6 +748,131 @@
 
     /* ネガティブプリセット */
     #neg-presets { display: flex; align-items: center; gap: 5px; border-left: 1px solid #333; padding-left: 8px; }
+
+    /* ── タブバー ───────────────────────────────── */
+    #tab-bar {
+      display: flex;
+      background: #0e0e1e;
+      border-bottom: 2px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+    .tab {
+      padding: 8px 20px;
+      font-size: 0.82rem;
+      color: #446;
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.12s;
+      white-space: nowrap;
+    }
+    .tab:hover { color: #9999cc; }
+    .tab.active { color: #8888ff; border-bottom-color: #5555cc; }
+
+    /* ── ページコンテナ ──────────────────────────── */
+    .page { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+    .page.active { display: flex; }
+
+    /* ── LoRA管理ページ ──────────────────────────── */
+    #page-loras { overflow-y: auto; padding: 14px 16px; gap: 14px; }
+    .page-section-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #7799aa;
+      margin-bottom: 8px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid #2a2a4a;
+    }
+
+    /* ── 履歴ページ ─────────────────────────────── */
+    #page-history { padding: 14px 16px; }
+
+    /* ── Civitai 検索 ────────────────────────────── */
+    #civitai-section {
+      border-top: 1px solid #2a2a4a;
+      padding-top: 14px;
+    }
+    #civitai-search-row {
+      display: flex;
+      gap: 6px;
+      margin: 8px 0 10px;
+    }
+    #civitai-query {
+      flex: 1;
+      background: #0f0f1a;
+      color: #d0d0e0;
+      border: 1px solid #2a2a4a;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 0.82rem;
+    }
+    #civitai-query:focus { outline: none; border-color: #5555aa; }
+    #civitai-search-btn {
+      background: #1a1a3a;
+      color: #8888cc;
+      border: 1px solid #2a2a5a;
+      border-radius: 4px;
+      padding: 5px 14px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #civitai-search-btn:hover:not(:disabled) { background: #252555; }
+    #civitai-search-btn:disabled { opacity: 0.5; cursor: default; }
+    #civitai-status { font-size: 0.73rem; color: #5577aa; margin-bottom: 6px; min-height: 1.2em; }
+    #civitai-results { display: flex; flex-direction: column; gap: 6px; }
+    .civitai-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      background: #111128;
+      border: 1px solid #2a2a4a;
+      border-radius: 6px;
+      font-size: 0.78rem;
+    }
+    .civitai-card-info { flex: 1; min-width: 0; }
+    .civitai-card-name { color: #9999dd; font-weight: 600; margin-bottom: 2px; }
+    .civitai-card-meta { color: #4466aa; font-size: 0.68rem; margin-bottom: 2px; }
+    .civitai-card-trigger { color: #5577aa; font-size: 0.67rem; word-break: break-all; }
+    .civitai-dl-btn {
+      background: #1e3a1e;
+      color: #80c080;
+      border: 1px solid #2a5a2a;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .civitai-dl-btn:hover:not(:disabled) { background: #243a24; }
+    .civitai-dl-btn:disabled { opacity: 0.55; cursor: default; }
+    .civitai-thumb {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 4px;
+      flex-shrink: 0;
+      cursor: pointer;
+      border: 1px solid #2a2a4a;
+      transition: border-color 0.1s;
+    }
+    .civitai-thumb:hover { border-color: #5555aa; }
+    .civitai-thumb-placeholder {
+      width: 80px;
+      height: 80px;
+      flex-shrink: 0;
+      background: #111128;
+      border: 1px solid #1e1e3a;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      color: #2a2a4a;
+    }
   </style>
 </head>
 <body>
@@ -858,130 +962,175 @@
     </label>
   </div>
 
-  <button id="lora-toggle-btn">🧩 LoRA 管理</button>
-  <button id="fav-toggle-btn">⭐ お気に入り</button>
-  <button id="hist-toggle-btn">📷 履歴</button>
-
   <div id="health">
     <div class="hdot"><div class="dot" id="dot-llm"></div><span>LLM</span></div>
     <div class="hdot"><div class="dot" id="dot-comfy"></div><span>ComfyUI</span></div>
   </div>
 </header>
 
-<!-- LoRA 管理パネル（トグル） -->
-<div id="lora-panel">
-  <div id="lora-list"><span id="lora-empty">登録済み LoRA はありません</span></div>
+<!-- ── タブナビゲーション ─────────────────────────── -->
+<nav id="tab-bar">
+  <a href="#generate" class="tab active">🎨 生成</a>
+  <a href="#loras"    class="tab">🧩 LoRA 管理</a>
+  <a href="#history"  class="tab">📷 履歴</a>
+</nav>
 
-  <div class="lp-row">
-    <select id="lora-file-sel" class="lp-input">
-      <option value="">LoRA ファイルを選択...</option>
-    </select>
-    <input id="lora-desc-inp" class="lp-input"
-           placeholder="説明（例: アニメ風スタイル、日本語で）" type="text">
-    <input id="lora-trigger-inp" class="lp-input"
-           placeholder="トリガーワード（任意）" type="text" style="width:160px">
-    <label style="font-size:0.72rem;color:#777;white-space:nowrap;align-self:center">強度</label>
-    <input id="lora-strength-inp" class="lp-input" type="number"
-           value="0.75" min="0.1" max="1.5" step="0.05">
-    <select id="lora-base-model" class="lp-input" style="width:100px">
-      <option value="pony">Pony</option>
-      <option value="sdxl">SDXL</option>
-      <option value="flux">Flux</option>
-      <option value="illustrious">Illustrious</option>
-      <option value="any">汎用</option>
-    </select>
-    <button id="lora-add-btn">＋ 登録</button>
-  </div>
-</div>
+<!-- ── 生成ページ ─────────────────────────────────── -->
+<div id="page-generate" class="page active">
 
-<!-- お気に入りパネル（トグル） -->
-<div id="fav-panel">
-  <div id="fav-save-row">
-    <input id="fav-name-inp" type="text"
-           placeholder="名前を入力して現在の設定を保存...">
-    <button id="fav-save-btn">★ 保存</button>
-  </div>
-  <div id="fav-list">
-    <span id="fav-empty">保存済みのお気に入りはありません</span>
-  </div>
-</div>
-
-<!-- 生成履歴パネル（トグル） -->
-<div id="history-panel">
-  <div id="history-panel-header">
-    <span>生成履歴（<span id="history-count">0</span>件）</span>
-    <button id="history-clear-btn">全て削除</button>
-  </div>
-  <div id="history-grid"></div>
-</div>
-
-<main id="main">
-  <!-- チャットパネル -->
-  <div id="chat-panel">
-    <div id="chat-history">
-      <div id="chat-empty">
-        日本語で画像の内容を入力してください<br>
-        <span style="font-size:0.72rem">例：赤いドレスの女性が花畑に立っている</span>
+  <!-- お気に入りバー（折りたたみ） -->
+  <div id="fav-strip">
+    <div id="fav-strip-top">
+      <button id="fav-toggle-btn">⭐ お気に入り</button>
+    </div>
+    <div id="fav-panel">
+      <div id="fav-save-row">
+        <input id="fav-name-inp" type="text"
+               placeholder="名前を入力して現在の設定を保存...">
+        <button id="fav-save-btn">★ 保存</button>
+      </div>
+      <div id="fav-list">
+        <span id="fav-empty">保存済みのお気に入りはありません</span>
       </div>
     </div>
+  </div>
 
-    <div id="input-area">
-      <!-- img2img 参照画像（省略可） -->
-      <div id="img2img-area">
-        <div id="img2img-drop">
-          <span>📎</span>
-          <span>参照画像（ドラッグ&ドロップ またはクリック）</span>
-          <input type="file" id="img2img-input" accept="image/*" style="display:none">
-        </div>
-        <div id="img2img-preview">
-          <img id="img2img-thumb" alt="">
-          <span id="img2img-name"></span>
-          <button id="mask-edit-btn" title="マスクを描いてインペイント">✏️ マスク</button>
-          <button id="img2img-clear" title="クリア">✕</button>
-        </div>
-        <div id="img2img-denoise">
-          <span>変化量</span>
-          <input type="range" id="denoise-slider" min="0.1" max="1.0" step="0.05" value="0.75">
-          <span id="denoise-val">0.75</span>
+  <main id="main">
+    <!-- チャットパネル -->
+    <div id="chat-panel">
+      <div id="chat-history">
+        <div id="chat-empty">
+          日本語で画像の内容を入力してください<br>
+          <span style="font-size:0.72rem">例：赤いドレスの女性が花畑に立っている</span>
         </div>
       </div>
-      <!-- フレーズサジェスト -->
-      <div id="phrase-bar">
-        <div id="phrase-cats"></div>
-        <div id="phrase-chips"></div>
+
+      <div id="input-area">
+        <!-- img2img 参照画像（省略可） -->
+        <div id="img2img-area">
+          <div id="img2img-drop">
+            <span>📎</span>
+            <span>参照画像（ドラッグ&ドロップ またはクリック）</span>
+            <input type="file" id="img2img-input" accept="image/*" style="display:none">
+          </div>
+          <div id="img2img-preview">
+            <img id="img2img-thumb" alt="">
+            <span id="img2img-name"></span>
+            <button id="mask-edit-btn" title="マスクを描いてインペイント">✏️ マスク</button>
+            <button id="img2img-clear" title="クリア">✕</button>
+          </div>
+          <div id="img2img-denoise">
+            <span>変化量</span>
+            <input type="range" id="denoise-slider" min="0.1" max="1.0" step="0.05" value="0.75">
+            <span id="denoise-val">0.75</span>
+          </div>
+        </div>
+        <!-- フレーズサジェスト -->
+        <div id="phrase-bar">
+          <div id="phrase-cats"></div>
+          <div id="phrase-chips"></div>
+        </div>
+        <textarea id="user-input"
+          placeholder="例：青空の下でコーヒーを飲む猫、アニメ風..."></textarea>
+        <div id="input-controls">
+          <span class="ctrl-label">Seed</span>
+          <input type="number" id="seed-input" value="-1" title="-1 でランダム">
+          <span class="hint">Ctrl+Enter</span>
+          <button id="generate-btn">生成</button>
+        </div>
       </div>
-      <textarea id="user-input"
-        placeholder="例：青空の下でコーヒーを飲む猫、アニメ風..."></textarea>
-      <div id="input-controls">
-        <span class="ctrl-label">Seed</span>
-        <input type="number" id="seed-input" value="-1" title="-1 でランダム">
-        <span class="hint">Ctrl+Enter</span>
-        <button id="generate-btn">生成</button>
+    </div>
+
+    <!-- プレビューパネル -->
+    <div id="preview-panel">
+      <div id="image-container">
+        <div id="img-placeholder">画像がここに表示されます</div>
+        <div id="spinner">
+          <div class="spin-ring"></div>
+          <span>生成中...</span>
+        </div>
+        <img id="preview-img" alt="生成画像">
       </div>
+
+      <div id="image-actions" style="display:none">
+        <button id="img-download-btn">⬇ ダウンロード</button>
+        <button id="img-copy-btn">📋 シード＋プロンプトをコピー</button>
+      </div>
+
+      <div id="prompt-info">
+        <span id="pi-empty">プロンプト情報がここに表示されます</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ── LoRA管理ページ ─────────────────────────────── -->
+<div id="page-loras" class="page">
+
+  <!-- 登録済み LoRA リスト -->
+  <div id="lora-panel">
+    <div class="page-section-title">🧩 登録済み LoRA</div>
+    <div id="lora-list"><span id="lora-empty">登録済み LoRA はありません</span></div>
+
+    <div class="lp-row">
+      <select id="lora-file-sel" class="lp-input">
+        <option value="">LoRA ファイルを選択...</option>
+      </select>
+      <input id="lora-desc-inp" class="lp-input"
+             placeholder="説明（例: アニメ風スタイル、日本語で）" type="text">
+      <input id="lora-trigger-inp" class="lp-input"
+             placeholder="トリガーワード（任意）" type="text" style="width:160px">
+      <label style="font-size:0.72rem;color:#777;white-space:nowrap;align-self:center">強度</label>
+      <input id="lora-strength-inp" class="lp-input" type="number"
+             value="0.75" min="0.1" max="1.5" step="0.05">
+      <select id="lora-base-model" class="lp-input" style="width:100px">
+        <option value="pony">Pony</option>
+        <option value="sdxl">SDXL</option>
+        <option value="flux">Flux</option>
+        <option value="illustrious">Illustrious</option>
+        <option value="any">汎用</option>
+      </select>
+      <button id="lora-add-btn">＋ 登録</button>
     </div>
   </div>
 
-  <!-- プレビューパネル -->
-  <div id="preview-panel">
-    <div id="image-container">
-      <div id="img-placeholder">画像がここに表示されます</div>
-      <div id="spinner">
-        <div class="spin-ring"></div>
-        <span>生成中...</span>
-      </div>
-      <img id="preview-img" alt="生成画像">
+  <!-- Civitai 検索 -->
+  <div id="civitai-section">
+    <div class="page-section-title">🔍 Civitai で LoRA を検索</div>
+    <p style="font-size:0.72rem;color:#446;margin-bottom:4px">キーワード（英語推奨）で Civitai から LoRA を検索してダウンロード・登録できます</p>
+    <div id="civitai-search-row">
+      <select id="civitai-domain" title="検索するサイト（.red は NSFW コンテンツを含む）"
+              style="background:#0f0f1a;color:#8888cc;border:1px solid #2a2a4a;border-radius:4px;padding:5px 6px;font-size:0.78rem;cursor:pointer;flex-shrink:0">
+        <option value="civitai.com">civitai.com</option>
+        <option value="civitai.red">civitai.red (NSFW)</option>
+      </select>
+      <input id="civitai-query" type="text"
+             placeholder="キーワード（例: umamusume, kantai collection）">
+      <select id="civitai-limit" title="検索件数"
+              style="background:#0f0f1a;color:#8888cc;border:1px solid #2a2a4a;border-radius:4px;padding:5px 6px;font-size:0.78rem;cursor:pointer;flex-shrink:0">
+        <option value="10">10件</option>
+        <option value="20">20件</option>
+        <option value="50">50件</option>
+        <option value="100">100件</option>
+      </select>
+      <button id="civitai-search-btn">検索</button>
     </div>
-
-    <div id="image-actions" style="display:none">
-      <button id="img-download-btn">⬇ ダウンロード</button>
-      <button id="img-copy-btn">📋 シード＋プロンプトをコピー</button>
-    </div>
-
-    <div id="prompt-info">
-      <span id="pi-empty">プロンプト情報がここに表示されます</span>
-    </div>
+    <div id="civitai-status"></div>
+    <div id="civitai-results"></div>
   </div>
-</main>
+
+</div>
+
+<!-- ── 履歴ページ ─────────────────────────────────── -->
+<div id="page-history" class="page">
+  <div id="history-panel">
+    <div id="history-panel-header">
+      <span>📷 生成履歴（<span id="history-count">0</span>件）</span>
+      <button id="history-clear-btn">全て削除</button>
+    </div>
+    <div id="history-grid"></div>
+  </div>
+</div>
 
 <!-- マスク編集モーダル -->
 <div id="mask-modal">
@@ -1145,9 +1294,9 @@
     } catch (e) { alert("エラー: " + e.message); }
   }
 
-  // チェックポイント変更時にパネルが開いていれば互換性表示を更新
+  // チェックポイント変更時に LoRA ページが表示されていれば互換性表示を更新
   $("checkpoint").addEventListener("change", () => {
-    if ($("lora-panel").classList.contains("open")) {
+    if ($("page-loras").classList.contains("active")) {
       loadLoraRegistry();
     }
   });
@@ -1199,17 +1348,6 @@
       $("width").value  = btn.dataset.w;
       $("height").value = btn.dataset.h;
     });
-  });
-
-  // LoRA パネル トグル
-  $("lora-toggle-btn").addEventListener("click", () => {
-    const panel = $("lora-panel");
-    const isOpen = panel.classList.toggle("open");
-    $("lora-toggle-btn").classList.toggle("active", isOpen);
-    if (isOpen) {
-      loadLoraFiles();
-      loadLoraRegistry();
-    }
   });
 
   $("lora-add-btn").addEventListener("click", addLora);
@@ -1619,12 +1757,6 @@
     showPromptInfo(entry.positive, entry.negative, entry.seed, entry.loras || []);
   }
 
-  $("hist-toggle-btn").addEventListener("click", () => {
-    const panel = $("history-panel");
-    const isOpen = panel.classList.toggle("open");
-    $("hist-toggle-btn").classList.toggle("active", isOpen);
-    if (isOpen) renderHistory();
-  });
   $("history-clear-btn").addEventListener("click", () => {
     if (!confirm("生成履歴を全て削除しますか？")) return;
     saveHistoryStore([]);
@@ -1683,7 +1815,7 @@
     $("adetail").checked   = !!fav.adetail;
     if (fav.sampler    !== undefined) $("sampler").value    = fav.sampler;
     if (fav.scheduler  !== undefined) $("scheduler").value  = fav.scheduler;
-    if ($("lora-panel").classList.contains("open")) loadLoraRegistry();
+    applyFav_loadLora();
   }
 
   function deleteFavorite(id) {
@@ -1719,6 +1851,11 @@
     $("fav-toggle-btn").classList.toggle("active", isOpen);
     if (isOpen) renderFavorites();
   });
+
+  // LoRA ページに移動した場合にリストをリロード
+  function applyFav_loadLora() {
+    if ($("page-loras").classList.contains("active")) loadLoraRegistry();
+  }
 
   $("fav-save-btn").addEventListener("click", saveCurrentAsFavorite);
   $("fav-name-inp").addEventListener("keydown", e => {
@@ -1959,6 +2096,138 @@
   }
 
   buildPhraseTabs();
+
+  // ── タブルーティング ──────────────────────────────────────────────
+  function activatePage(hash) {
+    const pageId = hash.replace(/^#/, "") || "generate";
+    const page = $("page-" + pageId);
+    if (!page) return;
+
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll("#tab-bar .tab").forEach(t => t.classList.remove("active"));
+    page.classList.add("active");
+    const tab = document.querySelector(`#tab-bar .tab[href="#${pageId}"]`);
+    if (tab) tab.classList.add("active");
+
+    if (pageId === "loras") {
+      loadLoraFiles();
+      loadLoraRegistry();
+    } else if (pageId === "history") {
+      renderHistory();
+    }
+  }
+
+  window.addEventListener("hashchange", () => activatePage(location.hash));
+  activatePage(location.hash);
+
+  // ── Civitai 検索 ──────────────────────────────────────────────────
+  async function civitaiSearch() {
+    const query  = $("civitai-query").value.trim();
+    const domain = $("civitai-domain").value;
+    const limit  = $("civitai-limit").value;
+    if (!query) return;
+    const btn = $("civitai-search-btn");
+    btn.disabled = true;
+    btn.textContent = "検索中...";
+    $("civitai-status").textContent = "";
+    $("civitai-results").innerHTML = "";
+
+    try {
+      const d = await fetch(
+        `/api/civitai/search?query=${encodeURIComponent(query)}&limit=${limit}&domain=${encodeURIComponent(domain)}`
+      ).then(r => r.json());
+      if (!d.ok) {
+        $("civitai-status").textContent = "エラー: " + (d.error || "不明");
+        return;
+      }
+      if (!d.results.length) {
+        $("civitai-status").textContent = "結果が見つかりませんでした";
+        return;
+      }
+      $("civitai-status").textContent = `${d.results.length} 件見つかりました（${domain}）`;
+      renderCivitaiResults(d.results, domain);
+    } catch (e) {
+      $("civitai-status").textContent = "通信エラー: " + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "検索";
+    }
+  }
+
+  function renderCivitaiResults(results, domain) {
+    const container = $("civitai-results");
+    container.innerHTML = results.map(r => {
+      const stars   = r.rating   ? `★${r.rating}` : "";
+      const dlCount = r.downloads ? `⬇${(r.downloads/1000).toFixed(0)}K` : "";
+      const trigger = r.trigger_words
+        ? `<div class="civitai-card-trigger">trigger: ${esc(r.trigger_words.slice(0, 120))}</div>` : "";
+      const thumb = r.preview_url
+        ? `<a href="${esc(r.model_url)}" target="_blank" title="Civitai で詳細を見る">
+             <img class="civitai-thumb" src="${esc(r.preview_url)}" loading="lazy" alt="${esc(r.name)}">
+           </a>`
+        : `<div class="civitai-thumb-placeholder">🖼</div>`;
+      return `<div class="civitai-card">
+        ${thumb}
+        <div class="civitai-card-info">
+          <div class="civitai-card-name">
+            <a href="${esc(r.model_url)}" target="_blank" style="color:inherit;text-decoration:none"
+               title="Civitai で詳細を見る">${esc(r.name)}</a>
+          </div>
+          <div class="civitai-card-meta">[${esc(r.base_model)}] ${esc(r.version_name)}  ${stars}  ${dlCount}</div>
+          ${trigger}
+        </div>
+        <button class="civitai-dl-btn"
+          data-model-id="${r.id}"
+          data-version-id="${r.version_id || ""}">ダウンロード</button>
+      </div>`;
+    }).join("");
+
+    container.querySelectorAll(".civitai-dl-btn").forEach(btn => {
+      btn.addEventListener("click", () => civitaiDownload(
+        parseInt(btn.dataset.modelId),
+        btn.dataset.versionId ? parseInt(btn.dataset.versionId) : null,
+        btn,
+        domain
+      ));
+    });
+  }
+
+  async function civitaiDownload(modelId, versionId, btn, domain) {
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "DL中...";
+    $("civitai-status").textContent = "ダウンロード中... しばらくお待ちください";
+
+    try {
+      const d = await fetch("/api/civitai/download", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model_id: modelId, version_id: versionId, domain: domain || "civitai.com"}),
+      }).then(r => r.json());
+
+      if (!d.ok) {
+        $("civitai-status").textContent = "エラー: " + (d.error || "不明");
+        btn.disabled = false;
+        btn.textContent = orig;
+        return;
+      }
+      btn.textContent = d.skip ? "登録済" : "登録完了";
+      $("civitai-status").textContent = d.skip
+        ? `スキップ: ${d.filename} は既にダウンロード済みです`
+        : `✓ ${d.filename} をダウンロードして登録しました — ${d.note}`;
+      await loadLoraFiles();
+      await loadLoraRegistry();
+    } catch (e) {
+      $("civitai-status").textContent = "通信エラー: " + e.message;
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  }
+
+  $("civitai-search-btn").addEventListener("click", civitaiSearch);
+  $("civitai-query").addEventListener("keydown", e => {
+    if (e.key === "Enter") civitaiSearch();
+  });
 </script>
 
 </body>

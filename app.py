@@ -3,9 +3,11 @@
 
 import argparse
 import json
+import os
 import pathlib
 import random
 import re
+import urllib.parse
 
 import aiohttp
 from aiohttp import web
@@ -23,6 +25,35 @@ NEGATIVE_PRESETS = {
     "品質向上":   "low quality, worst quality, normal quality, jpeg artifacts, blurry, pixelated, grainy, noisy, out of focus",
     "手崩れ防止": "bad hands, extra fingers, missing fingers, fused fingers, malformed hands, poorly drawn hands, mutated hands, deformed hands",
 }
+
+# ──── Civitai ─────────────────────────────────────────────────────
+CIVITAI_API = "https://civitai.com/api/v1"
+CIVITAI_UA  = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+CIVITAI_API_KEY = os.environ.get("CIVITAI_API_KEY", "")
+LORA_DIR = pathlib.Path.home() / "infra/comfyui/models/loras"
+
+_BASE_MODEL_MAP = {
+    "pony": "pony", "sdxl 1.0": "sdxl", "sdxl turbo": "sdxl",
+    "sdxl lightning": "sdxl", "sdxl": "sdxl",
+    "flux.1 d": "flux", "flux.1 s": "flux", "flux": "flux",
+    "illustrious": "illustrious", "illustrious xl": "illustrious",
+    "noobai xl": "illustrious",
+}
+
+
+def _civitai_map_base(bm: str) -> str:
+    return _BASE_MODEL_MAP.get(bm.lower().strip(), "any")
+
+
+def _civitai_headers() -> dict:
+    h = {"User-Agent": CIVITAI_UA}
+    if CIVITAI_API_KEY:
+        h["Authorization"] = f"Bearer {CIVITAI_API_KEY}"
+    return h
 
 
 # ──── LoRA レジストリ ─────────────────────────────────────────────
@@ -477,6 +508,151 @@ async def handle_negative_presets(request: web.Request) -> web.Response:
     return web.json_response(list(NEGATIVE_PRESETS.keys()))
 
 
+# ──── Civitai ハンドラ ────────────────────────────────────────────
+
+async def handle_civitai_search(request: web.Request) -> web.Response:
+    query  = request.rel_url.query.get("query", "").strip()
+    limit  = min(int(request.rel_url.query.get("limit", 10)), 100)
+    domain = request.rel_url.query.get("domain", "civitai.com")
+    if domain not in ("civitai.com", "civitai.red"):
+        domain = "civitai.com"
+    if not query:
+        return web.json_response({"ok": False, "error": "query パラメータが必要です"}, status=400)
+
+    base = f"https://{domain}/api/v1"
+    params = urllib.parse.urlencode({
+        "type": "LORA", "query": query, "sort": "Highest Rated", "limit": limit,
+    })
+    url = f"{base}/models?{params}"
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(
+                url, headers=_civitai_headers(),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    return web.json_response(
+                        {"ok": False, "error": f"Civitai API エラー: {resp.status}"}, status=502)
+                data = await resp.json(content_type=None)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": f"ネットワークエラー: {e}"}, status=502)
+
+    results = []
+    for m in data.get("items", []):
+        ver = (m.get("modelVersions") or [{}])[0]
+        images = ver.get("images", [])
+        preview_url = images[0]["url"] if images else None
+        results.append({
+            "id":           m["id"],
+            "name":         m["name"],
+            "rating":       round(m.get("stats", {}).get("rating", 0), 1),
+            "downloads":    m.get("stats", {}).get("downloadCount", 0),
+            "base_model":   _civitai_map_base(ver.get("baseModel", "")),
+            "trigger_words": ", ".join(ver.get("trainedWords", [])),
+            "version_id":   ver.get("id"),
+            "version_name": ver.get("name", ""),
+            "preview_url":  preview_url,
+            "model_url":    f"https://civitai.com/models/{m['id']}",
+        })
+    return web.json_response({"ok": True, "results": results})
+
+
+async def handle_civitai_download(request: web.Request) -> web.Response:
+    body       = await request.json()
+    model_id   = body.get("model_id")
+    version_id = body.get("version_id")
+    domain     = body.get("domain", "civitai.com")
+    if domain not in ("civitai.com", "civitai.red"):
+        domain = "civitai.com"
+    base = f"https://{domain}/api/v1"
+    if not model_id:
+        return web.json_response({"ok": False, "error": "model_id が必要です"}, status=400)
+
+    hdrs = _civitai_headers()
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(
+                f"{base}/models/{model_id}", headers=hdrs,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    return web.json_response(
+                        {"ok": False, "error": f"モデル情報取得失敗: {resp.status}"}, status=502)
+                model = await resp.json(content_type=None)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=502)
+
+    versions = model.get("modelVersions") or []
+    if not versions:
+        return web.json_response({"ok": False, "error": "バージョンが見つかりません"}, status=404)
+
+    if version_id:
+        ver = next((v for v in versions if v["id"] == version_id), None)
+        if ver is None:
+            return web.json_response(
+                {"ok": False, "error": f"version_id {version_id} が見つかりません"}, status=404)
+    else:
+        ver = versions[0]
+
+    sf_files = [f for f in ver.get("files", []) if f.get("name", "").endswith(".safetensors")]
+    if not sf_files:
+        return web.json_response(
+            {"ok": False, "error": ".safetensors ファイルが見つかりません"}, status=404)
+    target   = max(sf_files, key=lambda f: f.get("sizeKB", 0))
+    filename = target["name"]
+    dl_url   = target["downloadUrl"]
+    dest     = LORA_DIR / filename
+
+    skip = dest.exists()
+    if not skip:
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(
+                    dl_url, headers=hdrs,
+                    timeout=aiohttp.ClientTimeout(total=600),
+                ) as resp:
+                    if resp.status != 200:
+                        return web.json_response(
+                            {"ok": False, "error": f"ダウンロード失敗: {resp.status}"}, status=502)
+                    with open(dest, "wb") as fp:
+                        async for chunk in resp.content.iter_chunked(1024 * 1024):
+                            fp.write(chunk)
+        except Exception as e:
+            if dest.exists():
+                dest.unlink()
+            return web.json_response({"ok": False, "error": f"ダウンロードエラー: {e}"}, status=500)
+
+    trigger_words = ", ".join(ver.get("trainedWords", []))
+    base_model    = _civitai_map_base(ver.get("baseModel", ""))
+    desc_raw      = re.sub(r"<[^>]+>", " ",
+                           (model.get("description") or model.get("name") or filename))
+    description   = (desc_raw[:200] + "…") if len(desc_raw) > 200 else desc_raw.strip() or filename
+
+    registry = _load_registry()
+    existing = next((e for e in registry if e["filename"] == filename), None)
+    if existing:
+        reg_note = "既に comfy-chat に登録済みです"
+    else:
+        registry.append({
+            "filename":         filename,
+            "description":      description,
+            "trigger_words":    trigger_words,
+            "default_strength": 0.75,
+            "base_model":       base_model,
+        })
+        _save_registry(registry)
+        reg_note = "trigger_words は Civitai 公開情報から自動取得。LoRA管理画面で確認・編集を推奨。"
+
+    return web.json_response({
+        "ok":           True,
+        "filename":     filename,
+        "base_model":   base_model,
+        "trigger_words": trigger_words,
+        "skip":         skip,
+        "note":         reg_note,
+    })
+
+
 # ──── アプリ起動 ──────────────────────────────────────────────────
 
 async def on_startup(app):
@@ -512,6 +688,8 @@ def main():
     app.router.add_get("/api/image",             handle_image)
     app.router.add_get("/api/health",            handle_health)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
+    app.router.add_get("/api/civitai/search",    handle_civitai_search)
+    app.router.add_post("/api/civitai/download", handle_civitai_download)
 
     print(f"ComfyUI Chat → http://localhost:{args.port}")
     web.run_app(app, host=args.host, port=args.port, access_log=None)
