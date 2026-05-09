@@ -2,6 +2,11 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ── 秘密情報の読み込み ────────────────────────────────────────────
+if [[ -f ~/infra/secrets.env ]]; then
+  source ~/infra/secrets.env
+fi
 PORT=9000
 LLAMA_URL="http://localhost:11434"
 COMFY_URL="http://localhost:8188"
