@@ -461,8 +461,10 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                               denoise_strength: float = 0.75,
                               mask_image: Optional[str] = None,
                               sampler_name: str = "euler_ancestral",
-                              scheduler: str = "karras") -> Optional[dict]:
-    client_id = str(uuid.uuid4())
+                              scheduler: str = "karras",
+                              client_id: Optional[str] = None) -> Optional[dict]:
+    if client_id is None:
+        client_id = str(uuid.uuid4())
     workflow = _build_workflow(positive, negative, seed, width, height, steps, cfg,
                                ckpt_name, loras, hires_fix=hires_fix, adetail=adetail,
                                init_image=init_image, denoise_strength=denoise_strength,

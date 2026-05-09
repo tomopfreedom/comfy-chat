@@ -18,6 +18,12 @@ from pony_utils import (
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 LORA_REGISTRY_FILE = pathlib.Path(__file__).parent / "loras.json"
 
+NEGATIVE_PRESETS = {
+    "顔崩れ防止": "bad face, crooked nose, asymmetrical eyes, misaligned eyes, uneven eyes, bad teeth, malformed mouth, ugly face",
+    "品質向上":   "low quality, worst quality, normal quality, jpeg artifacts, blurry, pixelated, grainy, noisy, out of focus",
+    "手崩れ防止": "bad hands, extra fingers, missing fingers, fused fingers, malformed hands, poorly drawn hands, mutated hands, deformed hands",
+}
+
 
 # ──── LoRA レジストリ ─────────────────────────────────────────────
 
@@ -323,6 +329,8 @@ async def handle_generate(request):
     # 選択中チェックポイントと互換性のある LoRA のみ LLM に渡す
     registry = _filter_loras_for_model(request.app["lora_registry"], checkpoint)
 
+    client_id  = body.get("client_id") or None
+    negative_presets = body.get("negative_presets", [])
     confirmed_positive = body.get("confirmed_positive")
     confirmed_negative = body.get("confirmed_negative")
     valid_names = {e["filename"] for e in registry}
@@ -352,6 +360,13 @@ async def handle_generate(request):
         registry_map = {e["filename"]: e for e in registry}
         positive = _apply_lora_postprocess(positive, selected_loras, registry_map, checkpoint)
 
+    if negative_presets:
+        preset_tags = ", ".join(
+            NEGATIVE_PRESETS[p] for p in negative_presets if p in NEGATIVE_PRESETS
+        )
+        if preset_tags:
+            negative = _dedup_tags(negative + ", " + preset_tags) if negative else preset_tags
+
     try:
         img_info = await submit_image_async(
             positive, negative, seed, width, height, steps, cfg,
@@ -360,6 +375,7 @@ async def handle_generate(request):
             init_image=init_image, denoise_strength=denoise_strength,
             mask_image=mask_image,
             sampler_name=sampler_name, scheduler=scheduler,
+            client_id=client_id,
         )
     except Exception as e:
         return web.json_response({"ok": False, "error": f"ComfyUI エラー: {e}"})
@@ -457,6 +473,10 @@ async def handle_health(request):
     return web.json_response(results)
 
 
+async def handle_negative_presets(request: web.Request) -> web.Response:
+    return web.json_response(list(NEGATIVE_PRESETS.keys()))
+
+
 # ──── アプリ起動 ──────────────────────────────────────────────────
 
 async def on_startup(app):
@@ -491,6 +511,7 @@ def main():
     app.router.add_post("/api/upload",           handle_upload)
     app.router.add_get("/api/image",             handle_image)
     app.router.add_get("/api/health",            handle_health)
+    app.router.add_get("/api/negative-presets",  handle_negative_presets)
 
     print(f"ComfyUI Chat → http://localhost:{args.port}")
     web.run_app(app, host=args.host, port=args.port, access_log=None)
