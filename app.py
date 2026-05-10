@@ -2,17 +2,19 @@
 """ComfyUI Chat - 日本語自然言語 → 画像生成 Web アプリ"""
 
 import argparse
+import asyncio
 import json
 import os
 import pathlib
 import random
 import re
 import urllib.parse
+import uuid
 
 import aiohttp
 from aiohttp import web
 
-from pony_utils import (
+from comfy_utils import (
     COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX, ILLUSTRIOUS_QUALITY_PREFIX,
     translate_prompt, explain_tags, submit_image_async, get_checkpoints,
 )
@@ -356,6 +358,7 @@ async def handle_generate(request):
     steps  = int(body.get("steps", 25))
     cfg    = float(body.get("cfg", 7.0))
     seed      = int(body.get("seed", -1))
+    batch     = max(1, min(int(body.get("batch", 1)), 4))
     hires_fix = bool(body.get("hires_fix", False))
     adetail   = bool(body.get("adetail", False))
     init_image       = body.get("init_image") or None
@@ -408,33 +411,47 @@ async def handle_generate(request):
         if preset_tags:
             negative = _dedup_tags(negative + ", " + preset_tags) if negative else preset_tags
 
-    try:
-        img_info = await submit_image_async(
-            positive, negative, seed, width, height, steps, cfg,
+    seeds = [seed] + [random.randint(0, 2**32 - 1) for _ in range(batch - 1)]
+    tasks = [
+        submit_image_async(
+            positive, negative, s, width, height, steps, cfg,
             checkpoint, selected_loras, session,
             hires_fix=hires_fix, adetail=adetail,
             init_image=init_image, denoise_strength=denoise_strength,
             mask_image=mask_image,
             sampler_name=sampler_name, scheduler=scheduler,
-            client_id=client_id,
+            client_id=client_id if i == 0 else str(uuid.uuid4()),
         )
+        for i, s in enumerate(seeds)
+    ]
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
     except Exception as e:
         return web.json_response({"ok": False, "error": f"ComfyUI エラー: {e}"})
 
-    if img_info is None:
-        return web.json_response({"ok": False, "error": "画像生成タイムアウト（300秒経過）"})
+    images = []
+    for s, result in zip(seeds, results):
+        if isinstance(result, Exception):
+            continue
+        if result is None:
+            continue
+        fn = result.get("filename", "")
+        sf = result.get("subfolder", "")
+        ty = result.get("type", "output")
+        images.append({"url": f"/api/image?filename={fn}&subfolder={sf}&type={ty}", "seed": s})
 
-    filename  = img_info.get("filename", "")
-    subfolder = img_info.get("subfolder", "")
-    type_     = img_info.get("type", "output")
-    image_url = f"/api/image?filename={filename}&subfolder={subfolder}&type={type_}"
+    if not images:
+        first_err = next((r for r in results if isinstance(r, Exception)), None)
+        msg = str(first_err) if first_err else "画像生成タイムアウト（300秒経過）"
+        return web.json_response({"ok": False, "error": f"ComfyUI エラー: {msg}"})
 
     return web.json_response({
         "ok":        True,
         "positive":  positive,
         "negative":  negative,
-        "seed":      seed,
-        "image_url": image_url,
+        "seed":      images[0]["seed"],
+        "image_url": images[0]["url"],
+        "images":    images,
         "loras":     selected_loras,
     })
 

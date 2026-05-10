@@ -288,6 +288,26 @@
       object-fit: contain; border-radius: 3px; display: none;
     }
     #img-placeholder { color: #282840; font-size: 0.9rem; text-align: center; user-select: none; }
+
+    /* ── バッチグリッド ───────────────────────────── */
+    #batch-grid {
+      display: none;
+      width: 100%; height: 100%;
+      overflow: auto; padding: 6px;
+      gap: 6px;
+      align-content: center; justify-content: center;
+    }
+    #batch-grid.cols-2 { display: grid; grid-template-columns: 1fr 1fr; }
+    #batch-grid.cols-4 { display: grid; grid-template-columns: 1fr 1fr; }
+    .batch-thumb {
+      cursor: pointer; border: 2px solid #2a2a4a;
+      border-radius: 4px; width: 100%; height: auto;
+      object-fit: contain; transition: border-color 0.15s;
+      background: #080810;
+    }
+    .batch-thumb:hover  { border-color: #5555cc; }
+    .batch-thumb.selected { border-color: #8888ff; }
+
     #spinner {
       display: none; flex-direction: column; align-items: center;
       gap: 14px; color: #555; font-size: 0.85rem;
@@ -1131,6 +1151,12 @@
         <div id="input-controls">
           <span class="ctrl-label">Seed</span>
           <input type="number" id="seed-input" value="-1" title="-1 でランダム">
+          <span class="ctrl-label">バッチ</span>
+          <select id="batch-sel" style="background:#0f0f1a;color:#d0d0e0;border:1px solid #2a2a4a;border-radius:4px;padding:3px 6px;font-size:0.78rem;">
+            <option value="1">1枚</option>
+            <option value="2">2枚</option>
+            <option value="4">4枚</option>
+          </select>
           <span class="hint">Ctrl+Enter</span>
           <button id="generate-btn">生成</button>
         </div>
@@ -1146,11 +1172,13 @@
           <span>生成中...</span>
         </div>
         <img id="preview-img" alt="生成画像">
+        <div id="batch-grid"></div>
       </div>
 
       <div id="image-actions" style="display:none">
         <button id="img-download-btn">⬇ ダウンロード</button>
         <button id="img-copy-btn">📋 シード＋プロンプトをコピー</button>
+        <button id="img2img-set-btn">📐 img2imgにセット</button>
       </div>
 
       <div id="prompt-info">
@@ -1775,6 +1803,7 @@
           sampler:            $("sampler").value,
           scheduler:          $("scheduler").value,
           seed:               parseInt($("seed-input").value) || -1,
+          batch:              parseInt($("batch-sel").value) || 1,
           hires_fix:          $("hires-fix").checked,
           adetail:            $("adetail").checked,
           client_id:          clientId,
@@ -1805,21 +1834,45 @@
       bodyDiv.textContent = summary;
       msgDiv.replaceChild(bodyDiv, panel);
 
-      lastImageUrl = d.image_url;
-      lastSeed     = d.seed;
       lastPositive = d.positive;
       lastNegative = d.negative;
 
-      const img = $("preview-img");
-      img.onload = () => {
-        img.style.display = "block";
+      const images = d.images || [{url: d.image_url, seed: d.seed}];
+
+      if (images.length > 1) {
+        // バッチグリッド表示
+        const grid = $("batch-grid");
+        grid.innerHTML = "";
+        grid.className = images.length >= 4 ? "cols-4" : "cols-2";
+        images.forEach((item, idx) => {
+          const thumb = document.createElement("img");
+          thumb.className = "batch-thumb" + (idx === 0 ? " selected" : "");
+          thumb.alt = `seed: ${item.seed}`;
+          thumb.title = `seed: ${item.seed}`;
+          thumb.src = item.url + "&_t=" + Date.now();
+          thumb.addEventListener("click", () => {
+            grid.querySelectorAll(".batch-thumb").forEach(t => t.classList.remove("selected"));
+            thumb.classList.add("selected");
+            lastImageUrl = item.url;
+            lastSeed     = item.seed;
+            showPromptInfo(d.positive, d.negative, item.seed, d.loras);
+            $("seed-input").value = item.seed;
+          });
+          grid.appendChild(thumb);
+        });
+        $("preview-img").style.display = "none";
+        $("img-placeholder").style.display = "none";
         $("image-actions").style.display = "flex";
+        lastImageUrl = images[0].url;
+        lastSeed     = images[0].seed;
+        showPromptInfo(d.positive, d.negative, images[0].seed, d.loras);
+        $("seed-input").value = images[0].seed;
         addToHistory({
           id:         Date.now(),
-          seed:       d.seed,
+          seed:       images[0].seed,
           positive:   d.positive,
           negative:   d.negative,
-          image_url:  d.image_url,
+          image_url:  images[0].url,
           loras:      d.loras,
           checkpoint: genCheckpoint,
           width:      genWidth,
@@ -1827,11 +1880,32 @@
           timestamp:  Date.now(),
           userMsg:    originalText,
         });
-      };
-      img.src = d.image_url + "&_t=" + Date.now();
-
-      showPromptInfo(d.positive, d.negative, d.seed, d.loras);
-      $("seed-input").value = d.seed;
+      } else {
+        $("batch-grid").className = "";
+        lastImageUrl = images[0].url;
+        lastSeed     = images[0].seed;
+        const img = $("preview-img");
+        img.onload = () => {
+          img.style.display = "block";
+          $("image-actions").style.display = "flex";
+          addToHistory({
+            id:         Date.now(),
+            seed:       images[0].seed,
+            positive:   d.positive,
+            negative:   d.negative,
+            image_url:  images[0].url,
+            loras:      d.loras,
+            checkpoint: genCheckpoint,
+            width:      genWidth,
+            height:     genHeight,
+            timestamp:  Date.now(),
+            userMsg:    originalText,
+          });
+        };
+        img.src = images[0].url + "&_t=" + Date.now();
+        showPromptInfo(d.positive, d.negative, images[0].seed, d.loras);
+        $("seed-input").value = images[0].seed;
+      }
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "この内容で生成";
@@ -1878,6 +1952,25 @@
       btn.textContent = "✓ コピーしました";
       setTimeout(() => { btn.textContent = orig; }, 1500);
     });
+  });
+
+  $("img2img-set-btn").addEventListener("click", async () => {
+    if (!lastImageUrl) return;
+    const btn = $("img2img-set-btn");
+    btn.disabled = true;
+    btn.textContent = "読み込み中...";
+    try {
+      const resp = await fetch(lastImageUrl + "&_t=" + Date.now());
+      const blob = await resp.blob();
+      const file = new File([blob], "batch_selected.png", {type: "image/png"});
+      await handleImageFile(file);
+      btn.textContent = "✓ セット済み";
+      setTimeout(() => { btn.textContent = "📐 img2imgにセット"; btn.disabled = false; }, 1500);
+    } catch (e) {
+      alert("img2img セット失敗: " + e.message);
+      btn.textContent = "📐 img2imgにセット";
+      btn.disabled = false;
+    }
   });
 
   // ── 生成履歴 ────────────────────────────────────────────────────

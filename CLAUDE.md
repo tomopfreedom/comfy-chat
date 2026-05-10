@@ -26,7 +26,7 @@ python ~/projects/comfy-chat/app.py --port 9000
 
 ```
 app.py          HTTP ハンドラ（aiohttp.web）、LoRA レジストリ管理、positive の後処理
-pony_utils.py   LLM 呼び出し（translate_prompt）、ComfyUI ワークフロー構築と送信
+comfy_utils.py   LLM 呼び出し（translate_prompt）、ComfyUI ワークフロー構築と送信
 system_prompt.py  モデル別システムプロンプト定数（PONY / SDXL / FLUX）
 ```
 
