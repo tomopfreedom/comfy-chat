@@ -779,6 +779,15 @@
       transition: width 0.2s ease;
       border-radius: 4px;
     }
+    @keyframes prog-slide {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+    #gen-prog-bar.indeterminate {
+      width: 30% !important;
+      animation: prog-slide 1.4s ease-in-out infinite;
+      transition: none;
+    }
     #gen-prog-txt {
       display: block;
       font-size: 0.67rem;
@@ -947,6 +956,14 @@
       justify-content: center;
       font-size: 1.4rem;
       color: #2a2a4a;
+    }
+
+    @keyframes highlight-param {
+      0% { background: #4444aa; }
+      100% { background: #0f0f1a; }
+    }
+    .highlight-flash {
+      animation: highlight-param 1.5s ease-out;
     }
   </style>
 </head>
@@ -1406,8 +1423,48 @@
     } catch (e) { alert("エラー: " + e.message); }
   }
 
-  // チェックポイント変更時に LoRA ページが表示されていれば互換性表示を更新
+  // チェックポイント変更時にパラメータを自動調整
   $("checkpoint").addEventListener("change", () => {
+    const ckpt = $("checkpoint").value.toLowerCase();
+    const stepsInp = $("steps");
+    const cfgInp = $("cfg");
+
+    const flash = el => {
+      el.classList.remove("highlight-flash");
+      void el.offsetWidth; // reflow
+      el.classList.add("highlight-flash");
+    };
+
+    const samplerInp   = $("sampler");
+    const schedulerInp = $("scheduler");
+
+    const hiresInp = $("hires-fix");
+    const isLumina2 = ckpt.includes("turbo") || ckpt.includes("z-image");
+
+    if (isLumina2) {
+      stepsInp.value     = 6;
+      cfgInp.value       = 1.5;
+      samplerInp.value   = "euler";
+      schedulerInp.value = "simple";
+      hiresInp.checked   = false;
+      hiresInp.disabled  = true;
+      flash(stepsInp); flash(cfgInp); flash(samplerInp); flash(schedulerInp);
+    } else if (ckpt.includes("pony") || ckpt.includes("noob") || ckpt.includes("illustrious")) {
+      stepsInp.value     = 25;
+      cfgInp.value       = 7.0;
+      samplerInp.value   = "euler_ancestral";
+      schedulerInp.value = "karras";
+      hiresInp.disabled  = false;
+      flash(stepsInp); flash(cfgInp); flash(samplerInp); flash(schedulerInp);
+    } else {
+      stepsInp.value     = 20;
+      cfgInp.value       = 5.0;
+      samplerInp.value   = "euler_ancestral";
+      schedulerInp.value = "karras";
+      hiresInp.disabled  = false;
+      flash(stepsInp); flash(cfgInp); flash(samplerInp); flash(schedulerInp);
+    }
+
     if ($("page-loras").classList.contains("active")) {
       loadLoraRegistry();
     }
@@ -1664,15 +1721,22 @@
     const progBar  = $("gen-prog-bar");
     const progTxt  = $("gen-prog-txt");
 
+    // 生成開始直後に indeterminate アニメーションで即表示
+    progWrap.style.display = "block";
+    progBar.classList.add("indeterminate");
+    progTxt.textContent = "生成中...";
+
     let ws = null;
     try {
       ws = new WebSocket(`ws://localhost:8188/ws?clientId=${clientId}`);
+      ws.onerror = () => console.warn("ComfyUI WS 接続失敗（進捗は indeterminate 表示のまま）");
       ws.onmessage = evt => {
         try {
           const msg = JSON.parse(evt.data);
           if (msg.type === "progress" && msg.data) {
             const { value, max } = msg.data;
             if (max > 0) {
+              progBar.classList.remove("indeterminate");
               progWrap.style.display = "block";
               progBar.style.width    = (value / max * 100) + "%";
               progTxt.textContent    = `${value} / ${max} ステップ`;
@@ -1774,6 +1838,7 @@
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
       if (ws) { try { ws.close(); } catch {} }
+      progBar.classList.remove("indeterminate");
       progWrap.style.display = "none";
       progBar.style.width    = "0%";
       progTxt.textContent    = "";

@@ -98,6 +98,8 @@ def _ckpt_type(ckpt_name: str) -> str:
         return "flux"
     if "illustrious" in name or "noobai" in name:
         return "illustrious"
+    if "z-image" in name:
+        return "lumina2"
     return "sdxl"
 
 
@@ -169,6 +171,9 @@ async def handle_index(request):
 
 async def handle_checkpoints(request):
     checkpoints = await get_checkpoints(request.app["session"])
+    # Z-image-Turbo (split) を仮想的に追加
+    if "Z-image-Turbo" not in checkpoints:
+        checkpoints.append("Z-image-Turbo")
     return web.json_response({"checkpoints": checkpoints})
 
 

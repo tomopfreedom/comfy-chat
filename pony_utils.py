@@ -108,68 +108,71 @@ def _build_workflow(positive: str, negative: str, seed: int,
     if loras is None:
         loras = []
 
-    # CLIP Skip 2: ノード 20 で CLIPSetLastLayer を挿入（stop_at_clip_layer=-2）
-    # Pony / AutismMix 系はアニメらしい描画のためにこの設定が必須
-    clip_skip_src = ["20", 0]
+    # CLIP Skip 判定: Pony, NoobAI, Illustrious 系は -2、それ以外は -1
+    name_l = ckpt_name.lower()
+    clip_skip = -2 if ("pony" in name_l or "noob" in name_l or "illustrious" in name_l) else -1
 
-    # LoRA チェーン後の最終的な model/clip の参照元を事前計算
-    if loras:
-        last_lora_id = str(100 + len(loras) - 1)
-        model_src = [last_lora_id, 0]
-        clip_src  = [last_lora_id, 1]
+    # ワークフロー辞書の初期化
+    workflow = {}
+
+    # 1. ロード部分の構成
+    if ckpt_name == "Z-image-Turbo":
+        workflow["1"] = {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": "fp8_e4m3fn"}
+        }
+        workflow["22"] = {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"model": ["1", 0], "shift": 3.0}
+        }
+        workflow["21"] = {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "qwen_3_4b.safetensors", "type": "lumina2"}
+        }
+        workflow["3"] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": "ae.safetensors"}
+        }
+        model_src_base = ["22", 0]
+        clip_src_base  = ["21", 0]
     else:
-        model_src = ["1", 0]
-        clip_src  = clip_skip_src
+        workflow["1"] = {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {"ckpt_name": ckpt_name}
+        }
+        workflow["20"] = {
+            "class_type": "CLIPSetLastLayer",
+            "inputs": {"clip": ["1", 1], "stop_at_clip_layer": clip_skip}
+        }
+        workflow["3"] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": "sdxl_vae.safetensors"}
+        }
+        model_src_base = ["1", 0]
+        clip_src_base  = ["20", 0]
 
-    # 最終画像の出力元: adetail → 204（手修正後）、hires fix → 14、通常 → 7
-    if adetail:
-        save_image_src = ["204", 0]
-    elif hires_fix:
-        save_image_src = ["14", 0]
-    else:
-        save_image_src = ["7", 0]
+    # 2. LoRA ノードを 100 番台で直列に連結
+    prev_model, prev_clip = model_src_base, clip_src_base
+    for i, lora in enumerate(loras):
+        node_id = str(100 + i)
+        strength = float(lora.get("strength", 0.75))
+        workflow[node_id] = {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": prev_model,
+                "clip":  prev_clip,
+                "lora_name":      lora["name"],
+                "strength_model": strength,
+                "strength_clip":  strength,
+            },
+        }
+        prev_model = [node_id, 0]
+        prev_clip  = [node_id, 1]
+    
+    model_src = prev_model
+    clip_src  = prev_clip
 
-    # latent 入力の決定:
-    #   インペイント (init_image + mask_image) → node 34 (VAEEncodeForInpaint)
-    #   img2img (init_image のみ)             → node 31 (VAEEncode)
-    #   txt2img                               → node 2  (EmptyLatentImage)
-    if init_image and mask_image:
-        latent_src = ["34", 0]
-    elif init_image:
-        latent_src = ["31", 0]
-    else:
-        latent_src = ["2", 0]
-    base_denoise = denoise_strength if init_image else 1.0
-
-    workflow = {
-        "1": {"class_type": "CheckpointLoaderSimple",
-              "inputs": {"ckpt_name": ckpt_name}},
-        "20": {"class_type": "CLIPSetLastLayer",
-               "inputs": {"clip": ["1", 1], "stop_at_clip_layer": -2}},
-        "3": {"class_type": "VAELoader",
-              "inputs": {"vae_name": "sdxl_vae.safetensors"}},
-        "4": {"class_type": "CLIPTextEncode",
-              "inputs": {"text": positive, "clip": clip_src}},
-        "5": {"class_type": "CLIPTextEncode",
-              "inputs": {"text": negative, "clip": clip_src}},
-        "6": {"class_type": "KSampler",
-              "inputs": {
-                  "seed": seed, "steps": steps, "cfg": cfg,
-                  "sampler_name": sampler_name, "scheduler": scheduler,
-                  "denoise": base_denoise, "model": model_src,
-                  "positive": ["4", 0], "negative": ["5", 0],
-                  "latent_image": latent_src,
-              }},
-        "7": {"class_type": "VAEDecode",
-              "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
-        "8": {"class_type": "SaveImage",
-              "inputs": {"images": save_image_src, "filename_prefix": "comfy_chat/auto"}},
-    }
-
-    # txt2img: EmptyLatentImage / img2img: LoadImage → ImageScale → VAEEncode
-    # ImageScale (node 35/36) で width×height にリサイズ:
-    #   - 大画像による VRAM 不足を防ぐ
-    #   - 出力サイズを UI 指定値に統一する（VAEEncode は入力画像サイズで latent を作るため）
+    # 3. Latent 入力の決定 (txt2img / img2img / Inpaint)
     if init_image:
         workflow["30"] = {
             "class_type": "LoadImage",
@@ -186,7 +189,6 @@ def _build_workflow(positive: str, negative: str, seed: int,
             },
         }
         if mask_image:
-            # インペイント: mask を ImageToMask に通して VAEEncodeForInpaint へ
             workflow["32"] = {
                 "class_type": "LoadImage",
                 "inputs": {"image": mask_image, "upload": "image"},
@@ -214,37 +216,41 @@ def _build_workflow(positive: str, negative: str, seed: int,
                     "grow_mask_by": 6,
                 },
             }
+            latent_src = ["34", 0]
         else:
             workflow["31"] = {
                 "class_type": "VAEEncode",
                 "inputs": {"pixels": ["35", 0], "vae": ["3", 0]},
             }
+            latent_src = ["31", 0]
     else:
         workflow["2"] = {
             "class_type": "EmptyLatentImage",
             "inputs": {"width": width, "height": height, "batch_size": 1},
         }
+        latent_src = ["2", 0]
 
-    # LoRA ノードを 100 番台で直列に連結（CLIP skip 済みの出力から開始）
-    prev_model, prev_clip = ["1", 0], clip_skip_src
-    for i, lora in enumerate(loras):
-        node_id = str(100 + i)
-        strength = float(lora.get("strength", 0.75))
-        workflow[node_id] = {
-            "class_type": "LoraLoader",
-            "inputs": {
-                "model": prev_model,
-                "clip":  prev_clip,
-                "lora_name":      lora["name"],
-                "strength_model": strength,
-                "strength_clip":  strength,
-            },
-        }
-        prev_model = [node_id, 0]
-        prev_clip  = [node_id, 1]
+    base_denoise = denoise_strength if init_image else 1.0
 
-    # Hires fix: UpscaleModel → 4x → scale to 2x target → VAEEncode → KSampler(denoise=0.4) → VAEDecode
-    # ノード 8 の SaveImage が常にポーリング対象になるため submit_image_async の変更は不要
+    # 4. メインの生成ノード群
+    workflow.update({
+        "4": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": positive, "clip": clip_src}},
+        "5": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": negative, "clip": clip_src}},
+        "6": {"class_type": "KSampler",
+              "inputs": {
+                  "seed": seed, "steps": steps, "cfg": cfg,
+                  "sampler_name": sampler_name, "scheduler": scheduler,
+                  "denoise": base_denoise, "model": model_src,
+                  "positive": ["4", 0], "negative": ["5", 0],
+                  "latent_image": latent_src,
+              }},
+        "7": {"class_type": "VAEDecode",
+              "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
+    })
+
+    # 5. Hires fix
     if hires_fix:
         hires_steps = max(10, steps // 2)
         workflow["9"] = {
@@ -284,13 +290,10 @@ def _build_workflow(positive: str, negative: str, seed: int,
             "inputs": {"samples": ["13", 0], "vae": ["3", 0]},
         }
 
-    # ADetailer: 顔（200-201）→ 手（202-204）の順で再 inpaint
-    # 200 番台を使用し hires fix（9-14 番）・LoRA（100 番台）と衝突しない
+    # 6. ADetailer
     if adetail:
         adetail_steps = max(10, steps // 2)
         base_image_src = ["14", 0] if hires_fix else ["7", 0]
-
-        # 顔検出・修正
         workflow["200"] = {
             "class_type": "UltralyticsDetectorProvider",
             "inputs": {"model_name": "bbox/face_yolov8n.pt"},
@@ -298,41 +301,18 @@ def _build_workflow(positive: str, negative: str, seed: int,
         workflow["201"] = {
             "class_type": "FaceDetailer",
             "inputs": {
-                "image":          base_image_src,
-                "model":          model_src,
-                "clip":           clip_src,
-                "vae":            ["3", 0],
-                "guide_size":     384,
-                "guide_size_for": True,
-                "max_size":       1024,
-                "seed":           seed,
-                "steps":          adetail_steps,
-                "cfg":            cfg,
-                "sampler_name":   sampler_name,
-                "scheduler":      scheduler,
-                "positive":       ["4", 0],
-                "negative":       ["5", 0],
-                "denoise":        0.45,
-                "feather":        5,
-                "noise_mask":     True,
-                "force_inpaint":  True,
-                "bbox_threshold": 0.5,
-                "bbox_dilation":  10,
-                "bbox_crop_factor": 3.0,
-                "sam_detection_hint": "center-1",
-                "sam_dilation":   0,
-                "sam_threshold":  0.93,
-                "sam_bbox_expansion": 0,
-                "sam_mask_hint_threshold": 0.7,
-                "sam_mask_hint_use_negative": "False",
-                "drop_size":      10,
-                "bbox_detector":  ["200", 0],
-                "wildcard":       "",
-                "cycle":          1,
+                "image": base_image_src, "model": model_src, "clip": clip_src, "vae": ["3", 0],
+                "guide_size": 384, "guide_size_for": True, "max_size": 1024,
+                "seed": seed, "steps": adetail_steps, "cfg": cfg,
+                "sampler_name": sampler_name, "scheduler": scheduler,
+                "positive": ["4", 0], "negative": ["5", 0],
+                "denoise": 0.45, "feather": 5, "noise_mask": True, "force_inpaint": True,
+                "bbox_threshold": 0.5, "bbox_dilation": 10, "bbox_crop_factor": 3.0,
+                "sam_detection_hint": "center-1", "sam_dilation": 0, "sam_threshold": 0.93,
+                "sam_bbox_expansion": 0, "sam_mask_hint_threshold": 0.7, "sam_mask_hint_use_negative": "False",
+                "drop_size": 10, "bbox_detector": ["200", 0], "wildcard": "", "cycle": 1,
             },
         }
-
-        # 手検出・修正
         workflow["202"] = {
             "class_type": "UltralyticsDetectorProvider",
             "inputs": {"model_name": "bbox/hand_yolov8n.pt"},
@@ -340,41 +320,35 @@ def _build_workflow(positive: str, negative: str, seed: int,
         workflow["203"] = {
             "class_type": "BboxDetectorSEGS",
             "inputs": {
-                "bbox_detector": ["202", 0],
-                "image":         ["201", 0],
-                "threshold":     0.3,
-                "dilation":      10,
-                "crop_factor":   3.0,
-                "drop_size":     10,
-                "labels":        "hand",
+                "bbox_detector": ["202", 0], "image": ["201", 0],
+                "threshold": 0.3, "dilation": 10, "crop_factor": 3.0, "drop_size": 10, "labels": "hand",
             },
         }
         workflow["204"] = {
             "class_type": "DetailerForEach",
             "inputs": {
-                "image":          ["201", 0],
-                "segs":           ["203", 0],
-                "model":          model_src,
-                "clip":           clip_src,
-                "vae":            ["3", 0],
-                "guide_size":     384,
-                "guide_size_for": True,
-                "max_size":       1024,
-                "seed":           seed,
-                "steps":          adetail_steps,
-                "cfg":            cfg,
-                "sampler_name":   sampler_name,
-                "scheduler":      scheduler,
-                "positive":       ["4", 0],
-                "negative":       ["5", 0],
-                "denoise":        0.45,
-                "feather":        5,
-                "noise_mask":     True,
-                "force_inpaint":  True,
-                "wildcard":       "",
-                "cycle":          1,
+                "image": ["201", 0], "segs": ["203", 0], "model": model_src, "clip": clip_src, "vae": ["3", 0],
+                "guide_size": 384, "guide_size_for": True, "max_size": 1024,
+                "seed": seed, "steps": adetail_steps, "cfg": cfg,
+                "sampler_name": sampler_name, "scheduler": scheduler,
+                "positive": ["4", 0], "negative": ["5", 0],
+                "denoise": 0.45, "feather": 5, "noise_mask": True, "force_inpaint": True,
+                "wildcard": "", "cycle": 1,
             },
         }
+
+    # 出力先決定
+    if adetail:
+        save_image_src = ["204", 0]
+    elif hires_fix:
+        save_image_src = ["14", 0]
+    else:
+        save_image_src = ["7", 0]
+
+    workflow["8"] = {
+        "class_type": "SaveImage",
+        "inputs": {"images": save_image_src, "filename_prefix": "comfy_chat/auto"}
+    }
 
     return workflow
 
