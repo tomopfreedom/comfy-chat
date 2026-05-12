@@ -353,6 +353,38 @@
     }
     #image-actions button:hover { background: #1a1a3a; border-color: #5555aa; color: #aaaaee; }
 
+    /* ── AI レビュー結果パネル ──────────────────── */
+    #review-result { display:none; padding:8px 14px; border-top:1px solid #1e1e3a;
+      background:#080c14; font-size:0.75rem; flex-shrink:0;
+      max-height:300px; overflow-y:auto; }
+    #review-result.visible { display:block; }
+    .review-score { color:#9999ee; font-weight:600; margin-bottom:4px; }
+    .review-score.bad  { color:#ee6666; }
+    .review-score.good { color:#66cc88; }
+    .review-feedback { color:#8aacb8; line-height:1.5; margin-bottom:4px; }
+    .review-issues { color:#cc8866; padding-left:12px; margin:0 0 4px; }
+    .review-issues li { margin-bottom:2px; }
+    .review-fix-row { margin-top:6px; display:flex; gap:6px; align-items:center; }
+    .review-fix-label { color:#556688; min-width:54px; white-space:nowrap; }
+    .review-fix-tags  { color:#80c080; font-family:monospace; word-break:break-word; flex:1; }
+    #review-apply-btn { background:#1a2a1a; color:#66cc88; border:1px solid #2a4a2a;
+      border-radius:4px; padding:3px 10px; font-size:0.73rem; cursor:pointer; white-space:nowrap; }
+    #review-apply-btn:hover { background:#243424; }
+    #review-apply-btn:disabled { opacity:0.4; cursor:default; }
+    #review-chat-area { border-top:1px solid #1e1e3a; margin-top:8px; padding-top:6px; }
+    #review-chat-log { max-height:80px; overflow-y:auto; margin-bottom:4px; }
+    .review-chat-msg { font-size:0.72rem; padding:1px 0; line-height:1.4; }
+    .review-chat-msg.user { color:#7090a0; }
+    .review-chat-msg.asst { color:#9999ee; }
+    .review-chat-input-row { display:flex; gap:6px; }
+    #review-chat-input { flex:1; background:#0a1020; color:#c0c8d8; border:1px solid #1e2a3a;
+      border-radius:4px; padding:4px 8px; font-size:0.73rem; }
+    #review-chat-input::placeholder { color:#445566; }
+    #review-chat-btn { background:#1a2040; color:#9999ee; border:1px solid #2a2a5a;
+      border-radius:4px; padding:3px 10px; font-size:0.73rem; cursor:pointer; white-space:nowrap; }
+    #review-chat-btn:hover { background:#202850; }
+    #review-chat-btn:disabled { opacity:0.4; cursor:default; }
+
     /* ── お気に入りパネル ────────────────────────── */
     #fav-strip {
       background: #0a0a18;
@@ -1179,6 +1211,31 @@
         <button id="img-download-btn">⬇ ダウンロード</button>
         <button id="img-copy-btn">📋 シード＋プロンプトをコピー</button>
         <button id="img2img-set-btn">📐 img2imgにセット</button>
+        <button id="ai-review-btn">🔍 AI レビュー</button>
+      </div>
+
+      <div id="review-result">
+        <div class="review-score"    id="review-score-txt"></div>
+        <div class="review-feedback" id="review-feedback-txt"></div>
+        <ul class="review-issues"    id="review-issues-list"></ul>
+        <div class="review-fix-row" id="review-pos-fix-row" style="display:none">
+          <span class="review-fix-label">positive+</span>
+          <span class="review-fix-tags" id="review-fix-tags"></span>
+        </div>
+        <div class="review-fix-row" id="review-neg-fix-row" style="display:none">
+          <span class="review-fix-label">negative+</span>
+          <span class="review-fix-tags" id="review-neg-fix-tags"></span>
+        </div>
+        <div style="margin-top:6px" id="review-apply-row" style="display:none">
+          <button id="review-apply-btn">↓ 入力欄に反映</button>
+        </div>
+        <div id="review-chat-area" style="display:none">
+          <div id="review-chat-log"></div>
+          <div class="review-chat-input-row">
+            <input id="review-chat-input" type="text" placeholder="指摘に反論・補足...">
+            <button id="review-chat-btn">送信</button>
+          </div>
+        </div>
       </div>
 
       <div id="prompt-info">
@@ -1299,6 +1356,13 @@
   let lastSeed       = null;
   let lastPositive   = "";
   let lastNegative   = "";
+  let lastUserMsg    = "";
+
+  // レビュー会話セッション（初回レビュー時にロック）
+  let reviewHistory   = [];
+  let reviewImageUrl  = "";
+  let reviewPositive  = "";
+  let reviewUserMsg   = "";
 
   // ── ヘルスチェック ──────────────────────────────────────────────
   async function checkHealth() {
@@ -1836,6 +1900,7 @@
 
       lastPositive = d.positive;
       lastNegative = d.negative;
+      lastUserMsg  = originalText;
 
       const images = d.images || [{url: d.image_url, seed: d.seed}];
 
@@ -1973,6 +2038,141 @@
     }
   });
 
+  // ── AI レビュー ─────────────────────────────────────────────────
+  function applyReviewDisplay(d) {
+    $("review-score-txt").textContent = `スコア: ${d.score}/10`;
+    $("review-score-txt").className   = `review-score ${d.score >= 7 ? "good" : "bad"}`;
+    $("review-feedback-txt").textContent = d.feedback || "";
+    $("review-issues-list").innerHTML = (d.issues || []).map(i => `<li>${esc(i)}</li>`).join("");
+    const posFix = (d.positive_fix || "").trim();
+    const negFix = (d.negative_fix || "").trim();
+    if (posFix) {
+      $("review-fix-tags").textContent = posFix;
+      $("review-pos-fix-row").style.display = "flex";
+    } else {
+      $("review-pos-fix-row").style.display = "none";
+    }
+    if (negFix) {
+      $("review-neg-fix-tags").textContent = negFix;
+      $("review-neg-fix-row").style.display = "flex";
+    } else {
+      $("review-neg-fix-row").style.display = "none";
+    }
+    if (posFix || negFix) {
+      $("review-apply-btn").disabled = false;
+      $("review-apply-row").style.display = "block";
+    } else {
+      $("review-apply-row").style.display = "none";
+    }
+  }
+
+  $("ai-review-btn").addEventListener("click", async () => {
+    if (!lastImageUrl) return;
+    const btn = $("ai-review-btn"), resultDiv = $("review-result");
+    btn.disabled = true; btn.textContent = "起動中...";
+    resultDiv.classList.remove("visible");
+    reviewImageUrl = lastImageUrl;
+    reviewPositive = lastPositive;
+    reviewUserMsg  = lastUserMsg;
+    reviewHistory  = [];
+    $("review-chat-log").innerHTML = "";
+    $("review-chat-area").style.display = "none";
+    try {
+      const d = await fetch("/api/review", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({image_url: reviewImageUrl, positive: reviewPositive, user_message: reviewUserMsg}),
+      }).then(r => r.json());
+
+      if (!d.ok) {
+        $("review-score-txt").textContent = "⚠ " + (d.error || "レビュー失敗");
+        $("review-score-txt").className = "review-score bad";
+        $("review-feedback-txt").textContent = "";
+        $("review-issues-list").innerHTML = "";
+        $("review-pos-fix-row").style.display = "none";
+        $("review-neg-fix-row").style.display = "none";
+        $("review-apply-row").style.display = "none";
+      } else {
+        applyReviewDisplay(d);
+        reviewHistory = [{role: "assistant", content: JSON.stringify({
+          score: d.score, issues: d.issues, feedback: d.feedback,
+          positive_fix: d.positive_fix, negative_fix: d.negative_fix,
+        })}];
+        $("review-chat-area").style.display = "block";
+      }
+      resultDiv.classList.add("visible");
+    } catch (e) {
+      $("review-score-txt").textContent = "⚠ 通信エラー: " + e.message;
+      $("review-score-txt").className   = "review-score bad";
+      resultDiv.classList.add("visible");
+    } finally {
+      btn.disabled = false; btn.textContent = "🔍 AI レビュー";
+    }
+  });
+
+  $("review-apply-btn").addEventListener("click", () => {
+    const posFix = $("review-fix-tags").textContent.trim();
+    const negFix = $("review-neg-fix-tags").textContent.trim();
+    const parts = [];
+    if (posFix) parts.push(`positiveに「${posFix}」を追加`);
+    if (negFix)  parts.push(`negativeに「${negFix}」を追加`);
+    if (!parts.length) return;
+    const inp = $("user-input");
+    inp.value = `前回の画像を修正してください。${parts.join("し、")}してください。`;
+    inp.focus();
+    $("review-apply-btn").disabled = true;
+    $("review-apply-btn").textContent = "✓ 反映済み";
+  });
+
+  function appendReviewChat(role, text) {
+    const log = $("review-chat-log");
+    const div = document.createElement("div");
+    div.className = `review-chat-msg ${role}`;
+    div.textContent = (role === "user" ? "あなた: " : "AI: ") + text;
+    log.appendChild(div);
+    $("review-result").scrollTop = $("review-result").scrollHeight;
+  }
+
+  async function sendReviewChat() {
+    const input = $("review-chat-input");
+    const text = input.value.trim();
+    if (!text || !reviewHistory.length) return;
+    const btn = $("review-chat-btn");
+    btn.disabled = true; input.disabled = true;
+    appendReviewChat("user", text);
+    reviewHistory.push({role: "user", content: text});
+    input.value = "";
+    try {
+      const d = await fetch("/api/review", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          image_url: reviewImageUrl, positive: reviewPositive,
+          user_message: reviewUserMsg, review_history: reviewHistory,
+        }),
+      }).then(r => r.json());
+      if (d.ok) {
+        applyReviewDisplay(d);
+        reviewHistory.push({role: "assistant", content: JSON.stringify({
+          score: d.score, issues: d.issues, feedback: d.feedback,
+          positive_fix: d.positive_fix, negative_fix: d.negative_fix,
+        })});
+        appendReviewChat("asst", d.feedback || "（更新済み）");
+      } else {
+        appendReviewChat("asst", "⚠ " + (d.error || "エラー"));
+        reviewHistory.pop();
+      }
+    } catch (e) {
+      appendReviewChat("asst", "⚠ 通信エラー: " + e.message);
+      reviewHistory.pop();
+    } finally {
+      btn.disabled = false; input.disabled = false; input.focus();
+    }
+  }
+
+  $("review-chat-btn").addEventListener("click", sendReviewChat);
+  $("review-chat-input").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReviewChat(); }
+  });
+
   // ── 生成履歴 ────────────────────────────────────────────────────
   const HIST_KEY  = "comfy_chat_history";
   const HIST_MAX  = 100;
@@ -2022,6 +2222,7 @@
     lastSeed     = entry.seed;
     lastPositive = entry.positive;
     lastNegative = entry.negative;
+    lastUserMsg  = entry.userMsg || "";
     const img = $("preview-img");
     img.onload = () => { img.style.display = "block"; $("image-actions").style.display = "flex"; };
     img.src = entry.image_url + "&_t=" + Date.now();

@@ -16,7 +16,7 @@ from aiohttp import web
 
 from comfy_utils import (
     COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX, ILLUSTRIOUS_QUALITY_PREFIX,
-    translate_prompt, explain_tags, submit_image_async, get_checkpoints,
+    translate_prompt, explain_tags, review_image, submit_image_async, get_checkpoints,
 )
 
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
@@ -503,6 +503,36 @@ async def handle_image(request):
         return web.Response(status=502, text=f"ComfyUI proxy error: {e}")
 
 
+async def handle_review(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    image_url = (body.get("image_url") or "").strip()
+    if not image_url.startswith("/api/image"):
+        return web.json_response({"ok": False, "error": "image_url が不正です"}, status=400)
+
+    positive       = body.get("positive") or ""
+    user_message   = body.get("user_message") or ""
+    review_history = body.get("review_history") or None
+    session        = request.app["session"]
+
+    try:
+        result = await review_image(
+            image_url, positive, session,
+            user_message=user_message, review_history=review_history,
+        )
+        if result.get("positive_fix"):
+            existing = {t.strip().lower() for t in positive.split(",") if t.strip()}
+            new_tags = [t for t in result["positive_fix"].split(",")
+                        if t.strip() and t.strip().lower() not in existing]
+            result["positive_fix"] = ", ".join(t.strip() for t in new_tags)
+        return web.json_response({"ok": True, **result})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
 async def handle_health(request):
     session = request.app["session"]
     results = {"llm": False, "comfyui": False}
@@ -758,6 +788,7 @@ def main():
     app.router.add_post("/api/generate",         handle_generate)
     app.router.add_post("/api/upload",           handle_upload)
     app.router.add_get("/api/image",             handle_image)
+    app.router.add_post("/api/review",           handle_review)
     app.router.add_get("/api/health",            handle_health)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
