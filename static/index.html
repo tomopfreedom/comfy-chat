@@ -475,6 +475,35 @@
     .fav-del:hover { color: #cc5555; }
     #fav-empty { color: #3a3a5a; font-size: 0.8rem; }
 
+    /* ── タグ補完ドロップダウン ─────────────────────── */
+    .tag-ac-dropdown {
+      position: fixed;
+      z-index: 200;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 5px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      max-height: 220px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2a2a4a transparent;
+    }
+    .tag-ac-item {
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .tag-ac-item:hover, .tag-ac-item.tag-ac-active { background: #252565; }
+    .tag-ac-en { font-family: monospace; color: #aaaacc; white-space: nowrap; flex-shrink: 0; }
+    .tag-ac-ja { color: #667799; font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag-ac-item:hover .tag-ac-en,
+    .tag-ac-item.tag-ac-active .tag-ac-en { color: #ccccff; }
+    .tag-ac-item:hover .tag-ac-ja,
+    .tag-ac-item.tag-ac-active .tag-ac-ja { color: #99aacc; }
+
     /* ── 生成履歴ページ ─────────────────────────── */
     #history-panel {
       display: flex;
@@ -782,7 +811,7 @@
       min-height: 20px;
       margin-top: 3px;
     }
-    .tag-jp-loading { font-size: 0.65rem; color: #3a5a3a; font-style: italic; align-self: center; }
+
     .tag-jp-chip {
       background: #091509;
       border: 1px solid #1a3a1a;
@@ -1746,7 +1775,7 @@
       explanationHtml +
       `<div class="confirm-lbl">positive</div>` +
       `<textarea class="confirm-ta confirm-pos-ta">${esc(positive)}</textarea>` +
-      `<div class="tag-jp-section"><span class="tag-jp-loading">タグを解説中...</span></div>` +
+      `<div class="tag-jp-section"></div>` +
       `<div class="confirm-lbl">negative</div>` +
       `<textarea class="confirm-ta confirm-neg-ta">${esc(negative)}</textarea>` +
       loraSectionHtml +
@@ -1772,25 +1801,43 @@
       generateFromConfirmed(wrap, panel, loras, originalText);
     });
 
-    // タグ日本語解説を非同期で取得（確認パネル表示後にバックグラウンド実行）
+    // タグ日本語解説: tags.json で即時表示 → 未訳タグのみ LLM で補完
     const tagSection = panel.querySelector(".tag-jp-section");
-    fetch("/api/explain-tags", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({positive}),
-    }).then(r => r.json()).then(d => {
-      if (!d.ok || !d.tags || !d.tags.length) {
-        tagSection.innerHTML = "";
-        return;
-      }
-      tagSection.innerHTML = d.tags.map(t =>
-        `<span class="tag-jp-chip">` +
-        `<span class="tag-jp-en">${esc(t.en)}</span>` +
-        `<span class="tag-jp-txt">${esc(t.jp)}</span>` +
-        `</span>`
-      ).join("");
-      hist.scrollTop = hist.scrollHeight;
-    }).catch(() => { tagSection.innerHTML = ""; });
+    (async () => {
+      const map = await getTagMap();
+      let chips = positive.split(/[,\n]+/)
+        .map(s => s.trim()).filter(Boolean)
+        .map(tag => ({ en: tag, jp: map.get(tag) || null }));
+      if (!chips.length) { tagSection.innerHTML = ""; return; }
+
+      const renderChips = (list) => {
+        tagSection.innerHTML = list.map(t =>
+          `<span class="tag-jp-chip">` +
+          `<span class="tag-jp-en">${esc(t.en)}</span>` +
+          (t.jp ? `<span class="tag-jp-txt">${esc(t.jp)}</span>` : "") +
+          `</span>`
+        ).join("");
+        hist.scrollTop = hist.scrollHeight;
+      };
+
+      // Step 1: ローカル分を即時表示
+      renderChips(chips);
+
+      // Step 2: 未訳タグのみ LLM へ送信して補完
+      const missing = chips.filter(t => !t.jp).map(t => t.en);
+      if (!missing.length) return;
+      try {
+        const d = await fetch("/api/explain-tags", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ positive: missing.join(", ") }),
+        }).then(r => r.json());
+        if (!d.ok || !d.tags || !d.tags.length) return;
+        const llmMap = new Map(d.tags.map(t => [t.en, t.jp]));
+        chips = chips.map(t => ({ en: t.en, jp: t.jp || llmMap.get(t.en) || null }));
+        renderChips(chips);
+      } catch (_) {}
+    })();
   }
 
   // Step 2: 確認済みタグで ComfyUI に送信
@@ -2277,7 +2324,7 @@
   }
 
   function applyFavorite(fav) {
-    if (fav.message    !== undefined) $("user-input").value    = fav.message;
+    if (fav.message !== undefined && !$("user-input").value.trim()) $("user-input").value = fav.message;
     if (fav.checkpoint !== undefined) $("checkpoint").value    = fav.checkpoint;
     if (fav.width      !== undefined) $("width").value         = fav.width;
     if (fav.height     !== undefined) $("height").value        = fav.height;
@@ -2757,6 +2804,134 @@
   $("civitai-query").addEventListener("keydown", e => {
     if (e.key === "Enter") civitaiSearch();
   });
+
+  // ── タグデータ（遅延ロード）──────────────────────────────
+  let _tagsData = null;
+  async function loadTagsData() {
+    if (_tagsData) return _tagsData;
+    _tagsData = await (await fetch("/static/tags.json")).json();
+    return _tagsData;
+  }
+
+  let _tagMap = null;
+  async function getTagMap() {
+    if (_tagMap) return _tagMap;
+    const tags = await loadTagsData();
+    _tagMap = new Map(tags.map(t => [t.n, t.j || null]));
+    return _tagMap;
+  }
+
+  // ── タグ補完ドロップダウン ───────────────────────────────
+  let _acDropdown = null;
+  let _acActiveIdx = -1;
+  let _acCandidates = [];
+  let _acTargetTa = null;
+  let _acWordInfo = null;
+
+  function _getWordAtCursor(ta) {
+    const val = ta.value;
+    const pos = ta.selectionStart;
+    const before = val.slice(0, pos);
+    const lastSep = Math.max(before.lastIndexOf(","), before.lastIndexOf("\n"));
+    const wordStart = lastSep + 1;
+    const rawWord = before.slice(wordStart);
+    const trimmed = rawWord.trimStart();
+    const leadSpaces = rawWord.length - trimmed.length;
+    return { word: trimmed, start: wordStart + leadSpaces, end: pos };
+  }
+
+  function _closeAc() {
+    if (_acDropdown) { _acDropdown.remove(); _acDropdown = null; }
+    _acActiveIdx = -1; _acCandidates = []; _acTargetTa = null; _acWordInfo = null;
+  }
+
+  function _applyAc(tagName) {
+    if (!_acTargetTa || !_acWordInfo) return;
+    const val = _acTargetTa.value;
+    _acTargetTa.value = val.slice(0, _acWordInfo.start) + tagName + ", " + val.slice(_acWordInfo.end);
+    const cur = _acWordInfo.start + tagName.length + 2;
+    _acTargetTa.selectionStart = _acTargetTa.selectionEnd = cur;
+    _acTargetTa.dispatchEvent(new Event("input"));
+    _closeAc();
+  }
+
+  function _highlightAc() {
+    if (!_acDropdown) return;
+    [..._acDropdown.children].forEach((el, i) =>
+      el.classList.toggle("tag-ac-active", i === _acActiveIdx));
+    if (_acActiveIdx >= 0) _acDropdown.children[_acActiveIdx]?.scrollIntoView({ block: "nearest" });
+  }
+
+  function _renderAc(ta, candidates, wordInfo) {
+    _closeAc();
+    if (!candidates.length) return;
+    _acTargetTa = ta; _acCandidates = candidates; _acWordInfo = wordInfo;
+
+    const rect = ta.getBoundingClientRect();
+    const drop = document.createElement("div");
+    drop.className = "tag-ac-dropdown";
+    drop.style.left  = rect.left + "px";
+    drop.style.top   = rect.bottom + 2 + "px";
+    drop.style.width = rect.width + "px";
+
+    candidates.forEach((tag, i) => {
+      const item = document.createElement("div");
+      item.className = "tag-ac-item";
+      item.innerHTML = `<span class="tag-ac-en">${tag.n}</span>`
+        + (tag.j ? `<span class="tag-ac-ja">${tag.j}</span>` : "");
+      item.addEventListener("mousedown", e => { e.preventDefault(); _applyAc(tag.n); });
+      drop.appendChild(item);
+    });
+    document.body.appendChild(drop);
+    _acDropdown = drop;
+  }
+
+  const _isJa = s => /[぀-鿿]/.test(s);
+
+  document.addEventListener("input", async e => {
+    const ta = e.target;
+    if (!ta.matches(".confirm-pos-ta, .confirm-neg-ta")) return;
+    const wi = _getWordAtCursor(ta);
+    if (wi.word.length < 2) { _closeAc(); return; }
+    const tags = await loadTagsData();
+
+    let candidates;
+    if (_isJa(wi.word)) {
+      // 日本語入力 → j フィールドで部分一致
+      candidates = tags.filter(t => t.j && t.j.includes(wi.word)).slice(0, 12);
+    } else {
+      // 英語入力 → 前方一致優先 → 部分一致
+      const prefix  = tags.filter(t => t.n.startsWith(wi.word)).slice(0, 12);
+      const partial = prefix.length < 12
+        ? tags.filter(t => !t.n.startsWith(wi.word) && t.n.includes(wi.word)).slice(0, 12 - prefix.length)
+        : [];
+      candidates = [...prefix, ...partial];
+    }
+    _renderAc(ta, candidates, _getWordAtCursor(ta));
+  }, true);
+
+  document.addEventListener("keydown", e => {
+    if (!_acDropdown) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      _acActiveIdx = Math.min(_acActiveIdx + 1, _acCandidates.length - 1);
+      _highlightAc();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      _acActiveIdx = Math.max(_acActiveIdx - 1, 0);
+      _highlightAc();
+    } else if (e.key === "Enter" && _acActiveIdx >= 0) {
+      e.preventDefault();
+      _applyAc(_acCandidates[_acActiveIdx].n);
+    } else if (e.key === "Escape") {
+      _closeAc();
+    }
+  }, true);
+
+  document.addEventListener("click", e => {
+    if (_acDropdown && !_acDropdown.contains(e.target)) _closeAc();
+  });
+
 </script>
 
 </body>

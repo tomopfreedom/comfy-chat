@@ -777,6 +777,7 @@ def main():
     app.on_cleanup.append(on_cleanup)
 
     app.router.add_get("/",                      handle_index)
+    app.router.add_static("/static",             STATIC_DIR)
     app.router.add_get("/api/checkpoints",       handle_checkpoints)
     app.router.add_get("/api/loras",             handle_loras_get)
     app.router.add_post("/api/loras",            handle_loras_post)

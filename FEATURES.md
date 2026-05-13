@@ -25,15 +25,18 @@
 - レビュー結果に対してチャット形式で反論・補足が可能（誤指摘の訂正など）
 - 評価モデル: `Qwen3-VL-8B-Instruct-Q4_K_M.gguf`（`start-llama-vision.sh` で port 11435）
 
+### タグ補完（Danbooru タグ英語・日本語入力対応）
+**概要**: 確認パネルの `confirmed_positive` / `confirmed_negative` 編集中に Danbooru タグ候補をドロップダウン表示。英語入力（前方一致優先）・日本語入力（部分一致）の両方に対応。
+
+**実装内容**:
+- WD14 tagger の `selected_tags.csv`（一般タグ 6,947 件）を `static/tags.json` に変換して配信
+- 日本語翻訳は `boorutan/booru-japanese-tag` の人力翻訳（427件）＋機械翻訳（~100k件）をマージ（カバレッジ 99.7%）
+- 2文字以上の入力でドロップダウン表示、↑↓Enter/Esc/クリックで操作
+- 確認パネルのタグ解説チップも同データでローカルルックアップ（即時表示）し、未訳タグのみ LLM で補完
+
 ---
 
 # comfy-chat 追加機能候補（未実装）
-
-## 優先度: 高
-
-### 1. タグ補完 + WAI キャラ選択パネル
-**概要**: `confirmed_positive` / `confirmed_negative` 編集中に Danbooru/e621 タグ候補をドロップダウン表示。折りたたみ式の WAI キャラクター選択パネルからキャラ名をプロンプトに注入。
-**実装方針**: `danbooru_e621_merged.csv` と `wai-characters.csv` を `static/` に配置し、`/static` ルートで配信。フロントエンドのみの変更で完結。
 
 ## 優先度: 中
 
