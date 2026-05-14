@@ -293,6 +293,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "seam_fix_padding":   16,
                 "force_uniform_tiles": True,
                 "tiled_decode":       False,
+                "batch_size":         1,
             },
         }
 
