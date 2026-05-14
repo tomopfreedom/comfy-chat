@@ -25,6 +25,16 @@
 - レビュー結果に対してチャット形式で反論・補足が可能（誤指摘の訂正など）
 - 評価モデル: `Qwen3-VL-8B-Instruct-Q4_K_M.gguf`（`start-llama-vision.sh` で port 11435）
 
+### UltimateSDUpscale（タイル分割 Hires fix）
+**概要**: hires_fix 時の再サンプリングを `ComfyUI_UltimateSDUpscale` による 512px タイル分割処理に置き換え。旧実装（6ノード）を 2ノードに集約し、VRAM ピークを削減しながら出力品質を向上させる。
+
+**実装内容**:
+- 旧: `UpscaleModelLoader → ImageUpscaleWithModel → ImageScale → VAEEncode → KSampler → VAEDecode`（6ノード）
+- 新: `UpscaleModelLoader → UltimateSDUpscale`（2ノード）
+- タイル 512×512・`upscale_by=2.0`・`mode_type="Linear"` で動作
+- VRAM ピーク約 9.5GB（旧比 −1.5GB）、1024×1024 入力 → 2048×2048 出力
+- Extension: `ComfyUI_UltimateSDUpscale`（サブモジュール `ultimate-upscale-for-automatic1111` を含む）
+
 ### タグ補完（Danbooru タグ英語・日本語入力対応）
 **概要**: 確認パネルの `confirmed_positive` / `confirmed_negative` 編集中に Danbooru タグ候補をドロップダウン表示。英語入力（前方一致優先）・日本語入力（部分一致）の両方に対応。
 
@@ -63,3 +73,50 @@
 
 ### 6. ComfyUI キュー状況の可視化
 **概要**: 現在の ComfyUI キュー長（待機件数）をリアルタイム表示する。
+
+---
+
+# ComfyUI カスタムノード（Extension）による拡張候補
+
+現在インストール済み: `ComfyUI-Impact-Pack`（ADetailer）のみ。
+`_build_workflow()` にノードを追加するだけで統合できる。
+
+## 優先度: 高
+
+### ~~E1. UltimateSDUpscale（高品質タイルアップスケール）~~ ✅ 実装済み
+→ 実装済み機能セクションを参照。
+
+### E2. IP-Adapter（参照画像スタイル転写）
+**Extension**: `ComfyUI_IPAdapter_plus`
+**概要**: アップロードした参照画像のスタイル・キャラクター・雰囲気を生成画像に転写する。img2img より自然で柔軟な転写が可能。
+**実装方針**:
+- UI に「スタイル参照画像」アップロード欄と強度スライダーを追加。
+- `_build_workflow()` に IP-Adapter ノード群（500番台）を追加し、KSampler の conditioning に接続。
+- `IPAdapterModelLoader` + `IPAdapterApply` の 2 ノード構成。
+
+### E3. WD14 Tagger ノード（画像 → タグ自動抽出）
+**Extension**: `ComfyUI-WD14-Tagger`
+**概要**: img2img 時に参照画像から Danbooru タグを自動生成し、LLM のコンテキストに注入する。
+**実装方針**:
+- `handle_upload` 後にタグ抽出を非同期実行 → `translate_prompt()` のシステムプロンプトに参照タグとして追加。
+- 既存の `static/tags.json`（6,947件）と同じ語彙を共有するため整合性が高い。
+
+## 優先度: 中
+
+### E4. Inpaint Crop & Stitch（高品質インペイント）
+**Extension**: `ComfyUI-Inpaint-CropAndStitch`
+**概要**: マスク領域を切り抜いて高解像度でインペイントし、元画像に貼り戻す。全体解像度で処理する現行実装より顔・手の細部が大幅向上。
+**実装方針**:
+- インペイントパス（node 34: `VAEEncodeForInpaint`）を本 Extension のノード群に置き換え。
+
+### E5. AdvancedControlNet（ControlNet 強度制御）
+**Extension**: `ComfyUI-Advanced-ControlNet`
+**概要**: ControlNet の条件付け強度をサンプリングステップごとに制御。FEATURES.md #4 の ControlNet 実装時に必要。
+**実装方針**:
+- 標準 `ControlNetApply` の代替として使用。ステップ範囲指定（start/end %）で過剰適用を防止。
+
+### E6. SUPIR（AI 画像復元・超解像）
+**Extension**: `ComfyUI-SUPIR`
+**概要**: 生成済み画像を AI で復元・高精細化する後処理機能。
+**実装方針**:
+- 生成完了後に「✨ 画質向上」ボタンを追加し、SUPIR ワークフローを別途実行。

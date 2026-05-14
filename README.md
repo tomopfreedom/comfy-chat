@@ -15,7 +15,7 @@
 - **多衣装 LoRA 対応** — 衣装別の活性化トークンを description に記述し、LLM が文脈に応じて衣装を選択
 - **サーバー側トリガーワード付加** — LLM に依存せず、選択された LoRA のトリガーワードをサーバーが確実に付加
 - **サーバー側衣装タグ補完** — LLM が衣装タグを一部省略した場合もサーバーが全タグを補完
-- **Hires fix** — RealESRGAN 4x+ Anime 6B で 4x アップスケール後 2x に縮小して再サンプリング（denoise 0.45）
+- **Hires fix** — `UltimateSDUpscale` + RealESRGAN 4x+ Anime 6B による 512×512 タイル分割再サンプリング（denoise 0.45）、出力は 2x（2048×2048）
 - **ADetailer** — 顔（`face_yolov8n.pt`）と手（`hand_yolov8n.pt`）を YOLO で検出し、各領域を個別に再 inpaint
 - **img2img** — 参照画像をドラッグ&ドロップしてアップロード、変化量スライダーで忠実度を調整
 - **インペイント** — Canvas ブラシでマスクを描き、塗った範囲だけを再生成
@@ -46,8 +46,9 @@ Vision LLM（port 11435）は AI レビューボタンを押したときに `~/i
 
 ```
 ~/infra/comfyui/custom_nodes/
-├── ComfyUI-Impact-Pack      # FaceDetailer, DetailerForEach 等
-└── ComfyUI-Impact-Subpack   # UltralyticsDetectorProvider
+├── ComfyUI-Impact-Pack           # FaceDetailer, DetailerForEach 等
+├── ComfyUI-Impact-Subpack        # UltralyticsDetectorProvider
+└── ComfyUI_UltimateSDUpscale     # UltimateSDUpscale（タイル分割 Hires fix）
 ```
 
 ```
@@ -282,7 +283,8 @@ comfy-chat/
 | 100〜 | LoraLoader | LoRA チェーン（直列） | LoRA 使用時 |
 | 4〜7 | CLIPTextEncode × 2 + KSampler + VAEDecode | 基本生成パイプライン | 常時 |
 | 8 | SaveImage | 保存（`comfy_chat/auto`） | 常時（入力元が変わる） |
-| 9〜14 | UpscaleModelLoader → ImageUpscaleWithModel → ImageScale → VAEEncode → KSampler → VAEDecode | Hires fix | Hires fix ON 時 |
+| 9 | UpscaleModelLoader | アップスケールモデルロード | Hires fix ON 時 |
+| 10 | UltimateSDUpscale | タイル分割 2x 再サンプリング（512×512 タイル） | Hires fix ON 時 |
 | 200〜201 | UltralyticsDetectorProvider + FaceDetailer | 顔修正 | ADetail ON 時 |
 | 202〜204 | UltralyticsDetectorProvider + BboxDetectorSEGS + DetailerForEach | 手修正 | ADetail ON 時 |
 

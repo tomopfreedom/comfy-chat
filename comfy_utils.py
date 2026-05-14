@@ -258,7 +258,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
               "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
     })
 
-    # 5. Hires fix
+    # 5. Hires fix (UltimateSDUpscale によるタイル分割 2x アップスケール)
     if hires_fix:
         hires_steps = max(10, steps // 2)
         workflow["9"] = {
@@ -266,42 +266,40 @@ def _build_workflow(positive: str, negative: str, seed: int,
             "inputs": {"model_name": upscale_model},
         }
         workflow["10"] = {
-            "class_type": "ImageUpscaleWithModel",
-            "inputs": {"upscale_model": ["9", 0], "image": ["7", 0]},
-        }
-        workflow["11"] = {
-            "class_type": "ImageScale",
+            "class_type": "UltimateSDUpscale",
             "inputs": {
-                "image": ["10", 0],
-                "upscale_method": "lanczos",
-                "width":  width * 2,
-                "height": height * 2,
-                "crop": "disabled",
+                "upscale_model":      ["9", 0],
+                "image":              ["7", 0],
+                "model":              model_src,
+                "positive":           ["4", 0],
+                "negative":           ["5", 0],
+                "vae":                ["3", 0],
+                "upscale_by":         2.0,
+                "seed":               seed,
+                "steps":              hires_steps,
+                "cfg":                cfg,
+                "sampler_name":       sampler_name,
+                "scheduler":          scheduler,
+                "denoise":            0.45,
+                "mode_type":          "Linear",
+                "tile_width":         512,
+                "tile_height":        512,
+                "mask_blur":          8,
+                "tile_padding":       32,
+                "seam_fix_mode":      "None",
+                "seam_fix_denoise":   0.35,
+                "seam_fix_width":     64,
+                "seam_fix_mask_blur": 8,
+                "seam_fix_padding":   16,
+                "force_uniform_tiles": True,
+                "tiled_decode":       False,
             },
-        }
-        workflow["12"] = {
-            "class_type": "VAEEncode",
-            "inputs": {"pixels": ["11", 0], "vae": ["3", 0]},
-        }
-        workflow["13"] = {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed, "steps": hires_steps, "cfg": cfg,
-                "sampler_name": sampler_name, "scheduler": scheduler,
-                "denoise": 0.45, "model": model_src,
-                "positive": ["4", 0], "negative": ["5", 0],
-                "latent_image": ["12", 0],
-            },
-        }
-        workflow["14"] = {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["13", 0], "vae": ["3", 0]},
         }
 
     # 6. ADetailer
     if adetail:
         adetail_steps = max(10, steps // 2)
-        base_image_src = ["14", 0] if hires_fix else ["7", 0]
+        base_image_src = ["10", 0] if hires_fix else ["7", 0]
         workflow["200"] = {
             "class_type": "UltralyticsDetectorProvider",
             "inputs": {"model_name": "bbox/face_yolov8n.pt"},
@@ -349,7 +347,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
     if adetail:
         save_image_src = ["204", 0]
     elif hires_fix:
-        save_image_src = ["14", 0]
+        save_image_src = ["10", 0]
     else:
         save_image_src = ["7", 0]
 
