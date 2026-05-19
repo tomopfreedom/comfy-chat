@@ -657,7 +657,7 @@
     #brush-size       { width: 70px; accent-color: #5555cc; cursor: pointer; }
     #brush-size-val   { font-family: monospace; color: #8888cc; font-size: 0.72rem; min-width: 20px; }
 
-    #eraser-btn, #mask-clear-btn, #mask-cancel-btn, #mask-apply-btn {
+    #eraser-btn, #mask-clear-btn, #mask-cancel-btn, #mask-apply-btn, #mask-generate-btn {
       border-radius: 4px; padding: 4px 10px;
       font-size: 0.78rem; cursor: pointer; white-space: nowrap;
     }
@@ -670,6 +670,8 @@
     #mask-cancel-btn:hover { background: #252535; }
     #mask-apply-btn    { background: #1e3a1e; color: #80c080; border: 1px solid #2a5a2a; }
     #mask-apply-btn:hover  { background: #243a24; }
+    #mask-generate-btn { background: #5b21b6; color: #fff; border: 1px solid #7c3aed; font-weight: bold; }
+    #mask-generate-btn:hover { background: #6d28d9; }
 
     #mask-canvas-wrapper {
       overflow: auto; max-width: 90vw; max-height: 75vh;
@@ -1370,6 +1372,7 @@
     <button id="mask-clear-btn">クリア</button>
     <button id="mask-cancel-btn">キャンセル</button>
     <button id="mask-apply-btn">確定</button>
+    <button id="mask-generate-btn">確定して生成</button>
   </div>
   <div id="mask-canvas-wrapper">
     <canvas id="display-canvas"></canvas>
@@ -2517,8 +2520,9 @@
     redrawDisplay();
   });
   $("mask-cancel-btn").addEventListener("click", () => { $("mask-modal").classList.remove("open"); });
-  $("mask-apply-btn").addEventListener("click", async () => {
-    if (!maskCanvas) return;
+
+  async function uploadMask() {
+    if (!maskCanvas) return null;
     const blob = await new Promise(resolve => {
       const tmp    = document.createElement("canvas");
       tmp.width    = maskCanvas.width; tmp.height = maskCanvas.height;
@@ -2535,14 +2539,97 @@
     });
     const form = new FormData();
     form.append("image", blob, "mask.png");
+    const resp = await fetch("/api/upload", {method: "POST", body: form}).then(r => r.json());
+    if (!resp.ok) throw new Error(resp.error || "マスクアップロード失敗");
+    uploadedMaskName = resp.filename;
+    $("mask-edit-btn").classList.add("has-mask");
+    return uploadedMaskName;
+  }
+
+  $("mask-apply-btn").addEventListener("click", async () => {
     try {
-      const resp = await fetch("/api/upload", {method: "POST", body: form}).then(r => r.json());
-      if (!resp.ok) { alert("マスクのアップロードに失敗: " + (resp.error || "")); return; }
-      uploadedMaskName = resp.filename;
-      $("mask-edit-btn").classList.add("has-mask");
+      await uploadMask();
       $("mask-modal").classList.remove("open");
     } catch (e) { alert("エラー: " + e.message); }
   });
+
+  async function generateFromMask() {
+    if (generating) return;
+    setGenerating(true);
+    addMsg("user", "🖊 マスク再生成");
+    const genCheckpoint = $("checkpoint").value;
+    const genWidth      = parseInt($("width").value);
+    const genHeight     = parseInt($("height").value);
+    const clientId      = crypto.randomUUID();
+    try {
+      const d = await fetch("/api/generate", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          message:            lastUserMsg || "",
+          confirmed_positive: lastPositive,
+          confirmed_negative: lastNegative,
+          loras:              [],
+          checkpoint:         genCheckpoint,
+          width:              genWidth,
+          height:             genHeight,
+          steps:              parseInt($("steps").value),
+          cfg:                parseFloat($("cfg").value),
+          sampler:            $("sampler").value,
+          scheduler:          $("scheduler").value,
+          seed:               parseInt($("seed-input").value) || -1,
+          batch:              parseInt($("batch-sel").value) || 1,
+          hires_fix:          $("hires-fix").checked,
+          adetail:            $("adetail").checked,
+          client_id:          clientId,
+          negative_presets:   [],
+          init_image:         uploadedImageName || null,
+          mask_image:         uploadedMaskName  || null,
+          denoise:            uploadedImageName ? parseFloat($("denoise-slider").value) : 1.0,
+        }),
+      }).then(r => r.json());
+      if (!d.ok) { addMsg("assistant", "⚠ " + (d.error || "不明なエラー")); return; }
+      const images = d.images || [{url: d.image_url, seed: d.seed}];
+      lastImageUrl = images[0].url;
+      lastSeed     = images[0].seed;
+      const img = $("preview-img");
+      img.onload = () => {
+        img.style.display = "block";
+        $("image-actions").style.display = "flex";
+        addToHistory({
+          id: Date.now(), seed: images[0].seed,
+          positive: d.positive, negative: d.negative,
+          image_url: images[0].url, loras: d.loras,
+          checkpoint: genCheckpoint, width: genWidth, height: genHeight,
+          timestamp: Date.now(), userMsg: "マスク再生成",
+        });
+      };
+      img.src = images[0].url + "&_t=" + Date.now();
+      $("img-placeholder").style.display = "none";
+      $("batch-grid").className = "";
+      showPromptInfo(d.positive, d.negative, images[0].seed, d.loras);
+      $("seed-input").value = images[0].seed;
+      lastPositive = d.positive;
+      lastNegative = d.negative;
+    } catch (e) {
+      addMsg("assistant", "⚠ 通信エラー: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  $("mask-generate-btn").addEventListener("click", async () => {
+    if (!lastPositive) {
+      alert("先にチャットで画像を生成してください（初回の外部画像には未対応）");
+      return;
+    }
+    try {
+      await uploadMask();
+    } catch (e) { alert("エラー: " + e.message); return; }
+    $("mask-modal").classList.remove("open");
+    generateFromMask();
+  });
+
   $("mask-edit-btn").addEventListener("click", openMaskEditor);
 
   // ── フレーズサジェスト ─────────────────────────────────────────────
