@@ -521,6 +521,20 @@ async def review_image(
     finally:
         subprocess.run(["pkill", "-f", "llama-server.*11435"], check=False)
         subprocess.run(["systemctl", "--user", "start", "llama-server"], check=False)
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            await asyncio.sleep(2)
+            try:
+                async with session.get(
+                    "http://localhost:11434/health",
+                    timeout=aiohttp.ClientTimeout(total=3),
+                ) as r:
+                    if r.status == 200:
+                        hdata = await r.json(content_type=None)
+                        if hdata.get("status") == "ok":
+                            break
+            except Exception:
+                pass
 
     if "choices" not in data:
         raise RuntimeError(f"Vision LLM 異常レスポンス: {json.dumps(data, ensure_ascii=False)[:300]}")
