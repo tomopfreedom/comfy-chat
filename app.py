@@ -22,6 +22,10 @@ from wan_utils import (
     submit_wan_i2v_async,
     WAN_MODEL_A14B, WAN_MODEL_A14B_LOW, WAN_ANIME_LORA,
 )
+from wm_utils import (
+    get_first_frame_jpeg, remove_watermark_video, _validate_video,
+)
+from wm_comfy import remove_watermark_video_comfy
 
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 LORA_REGISTRY_FILE = pathlib.Path(__file__).parent / "loras.json"
@@ -894,6 +898,95 @@ async def handle_civitai_download(request: web.Request) -> web.Response:
     })
 
 
+# ──── ウォーターマーク除去 ────────────────────────────────────────
+
+async def handle_wm_preview(request: web.Request) -> web.Response:
+    """POST /api/wm/preview — 動画の最初のフレームを JPEG で返す。"""
+    reader = await request.multipart()
+    data = b""
+    filename = "upload.mp4"
+    async for field in reader:
+        if field.name == "video":
+            filename = field.filename or filename
+            data = await field.read()
+            break
+
+    if not data:
+        return web.Response(status=400, text="video フィールドが見つかりません")
+    try:
+        _validate_video(filename, data)
+    except ValueError as e:
+        return web.Response(status=400, text=str(e))
+
+    loop = asyncio.get_event_loop()
+    try:
+        jpeg = await loop.run_in_executor(None, get_first_frame_jpeg, data)
+    except Exception as e:
+        return web.Response(status=500, text=f"フレーム取得エラー: {e}")
+
+    return web.Response(body=jpeg, content_type="image/jpeg")
+
+
+async def handle_wm_process(request: web.Request) -> web.Response:
+    """POST /api/wm/process — ウォーターマークを除去した MP4 を返す。"""
+    reader = await request.multipart()
+    data = b""
+    filename = "upload.mp4"
+    params: dict[str, str] = {}
+    async for field in reader:
+        if field.name == "video":
+            filename = field.filename or filename
+            data = await field.read()
+        else:
+            params[field.name] = (await field.read()).decode()
+
+    if not data:
+        return web.Response(status=400, text="video フィールドが見つかりません")
+    try:
+        _validate_video(filename, data)
+    except ValueError as e:
+        return web.Response(status=400, text=str(e))
+
+    # 数値パラメータのバリデーション
+    try:
+        x1 = int(params.get("x1", "1140"))
+        y1 = int(params.get("y1", "560"))
+        x2 = int(params.get("x2", "1245"))
+        y2 = int(params.get("y2", "665"))
+    except ValueError:
+        return web.Response(status=400, text="座標は整数で指定してください")
+
+    keep_audio = params.get("keep_audio", "true").lower() not in ("false", "0", "")
+    method     = params.get("method", "telea").lower()
+
+    if method == "comfy":
+        # AI インペインティング（ComfyUI）
+        ckpt_name = params.get("ckpt_name", "NoobAI-XL-v1.1.safetensors")
+        session = request.app["session"]
+        try:
+            mp4 = await remove_watermark_video_comfy(
+                data, x1, y1, x2, y2, keep_audio, session, ckpt_name
+            )
+        except Exception as e:
+            return web.Response(status=500, text=f"AI 処理エラー: {e}")
+    else:
+        # 標準インペインティング（cv2 TELEA）
+        loop = asyncio.get_event_loop()
+        try:
+            mp4 = await loop.run_in_executor(
+                None,
+                lambda: remove_watermark_video(data, x1, y1, x2, y2, keep_audio),
+            )
+        except Exception as e:
+            return web.Response(status=500, text=f"処理エラー: {e}")
+
+    return web.Response(
+        body=mp4,
+        content_type="video/mp4",
+        headers={"Content-Disposition": 'attachment; filename="clean.mp4"'},
+    )
+
+
 # ──── アプリ起動 ──────────────────────────────────────────────────
 
 async def on_startup(app):
@@ -935,6 +1028,8 @@ def main():
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
     app.router.add_get("/api/civitai/model",     handle_civitai_model)
     app.router.add_post("/api/civitai/download", handle_civitai_download)
+    app.router.add_post("/api/wm/preview",       handle_wm_preview)
+    app.router.add_post("/api/wm/process",       handle_wm_process)
 
     print(f"ComfyUI Chat → http://localhost:{args.port}")
     web.run_app(app, host=args.host, port=args.port, access_log=None)

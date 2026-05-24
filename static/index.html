@@ -925,6 +925,133 @@
     /* ── 履歴ページ ─────────────────────────────── */
     #page-history { padding: 14px 16px; }
 
+    /* ── 動画編集ページ ──────────────────────────── */
+    #page-video-edit {
+      padding: 14px 16px;
+      overflow-y: auto;
+      gap: 14px;
+    }
+    #wm-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      max-width: 720px;
+    }
+    #wm-panel h2 {
+      margin: 0;
+      font-size: 1rem;
+      color: #aaaadd;
+    }
+    .wm-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .wm-coords-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+    .wm-coords-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.78rem;
+      color: #9999bb;
+    }
+    .wm-coords-grid input[type=number] {
+      width: 100%;
+      background: #1a1a2e;
+      border: 1px solid #3a3a6a;
+      color: #ddddff;
+      padding: 5px 8px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    #wm-preview-container {
+      border-radius: 8px;
+      border: 1px solid #3a3a6a;
+      overflow: hidden;
+      user-select: none;
+    }
+    #wm-preview-img {
+      display: block;
+      max-width: 100%;
+    }
+    #wm-select-canvas {
+      /* CSS サイズは JS で動的に設定する */
+    }
+    #wm-result-video {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid #3a3a6a;
+    }
+    #wm-progress {
+      color: #8888ff;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wm-spinner {
+      width: 16px; height: 16px;
+      border: 2px solid #3a3a6a;
+      border-top-color: #8888ff;
+      border-radius: 50%;
+      animation: wm-spin 0.7s linear infinite;
+    }
+    @keyframes wm-spin { to { transform: rotate(360deg); } }
+    #wm-download-link {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 8px 18px;
+      background: #2a2a5a;
+      color: #aaaaff;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    #wm-download-link:hover { background: #3a3a7a; }
+    .wm-result-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    #wm-reinpaint-btn {
+      padding: 7px 14px;
+      font-size: 0.88rem;
+      border-radius: 8px;
+    }
+
+    /* 処理方式ラジオボタン */
+    .wm-method-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .wm-method-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .wm-method-label:has(input:checked) {
+      border-color: #6666cc;
+      background: #1e1e3e;
+    }
+    .wm-method-label input[type=radio] { margin-top: 3px; accent-color: #6666cc; }
+    .wm-method-label span { display: flex; flex-direction: column; gap: 2px; }
+    .wm-method-label strong { font-size: 0.88rem; color: #ccccee; }
+    .wm-method-label small  { font-size: 0.76rem; color: #888899; }
+
     /* ── Civitai 検索 ────────────────────────────── */
     #civitai-section {
       border-top: 1px solid #2a2a4a;
@@ -1150,9 +1277,10 @@
 
 <!-- ── タブナビゲーション ─────────────────────────── -->
 <nav id="tab-bar">
-  <a href="#generate" class="tab active">🎨 生成</a>
-  <a href="#loras"    class="tab">🧩 LoRA 管理</a>
-  <a href="#history"  class="tab">📷 履歴</a>
+  <a href="#generate"    class="tab active">🎨 生成</a>
+  <a href="#loras"       class="tab">🧩 LoRA 管理</a>
+  <a href="#history"     class="tab">📷 履歴</a>
+  <a href="#video-edit"  class="tab">🎞️ 動画編集</a>
 </nav>
 
 <!-- ── 生成ページ ─────────────────────────────────── -->
@@ -1362,6 +1490,91 @@
       <button id="history-clear-btn">全て削除</button>
     </div>
     <div id="history-grid"></div>
+  </div>
+</div>
+
+<!-- ── 動画編集ページ ─────────────────────────────── -->
+<div id="page-video-edit" class="page">
+  <div id="wm-panel">
+    <h2>🎞️ ウォーターマーク除去</h2>
+
+    <!-- ① ファイル選択 -->
+    <div class="wm-row">
+      <input type="file" id="wm-file-input" accept="video/mp4,video/quicktime,video/webm">
+      <button id="wm-preview-btn" class="btn-secondary" disabled>フレーム確認</button>
+    </div>
+
+    <!-- プレビュー画像 + ドラッグ選択 Canvas -->
+    <div id="wm-preview-container" style="display:none; position:relative; width:fit-content; max-width:100%;">
+      <img id="wm-preview-img" alt="フレームプレビュー" style="display:block; max-width:100%;">
+      <canvas id="wm-select-canvas" style="position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;"></canvas>
+    </div>
+    <p id="wm-select-hint" style="display:none; font-size:0.78rem; color:#888899; margin-top:4px;">
+      ↑ ドラッグして除去範囲を選択（座標フィールドに自動反映されます）
+    </p>
+
+    <!-- ② マスク座標 -->
+    <div>
+      <div style="font-size:0.82rem;color:#9999bb;margin-bottom:6px;">
+        除去範囲（ピクセル座標） — フレームを確認して調整してください
+      </div>
+      <div class="wm-coords-grid">
+        <label>X1（左端）<input type="number" id="wm-x1" value="1140" min="0"></label>
+        <label>Y1（上端）<input type="number" id="wm-y1" value="560"  min="0"></label>
+        <label>X2（右端）<input type="number" id="wm-x2" value="1245" min="1"></label>
+        <label>Y2（下端）<input type="number" id="wm-y2" value="665"  min="1"></label>
+      </div>
+    </div>
+
+    <!-- ③ 処理方式 -->
+    <div>
+      <div style="font-size:0.82rem;color:#9999bb;margin-bottom:6px;">処理方式</div>
+      <div class="wm-method-group">
+        <label class="wm-method-label">
+          <input type="radio" name="wm-method" value="telea" checked>
+          <span>
+            <strong>標準 (TELEA)</strong>
+            <small>高速・数秒で完了</small>
+          </span>
+        </label>
+        <label class="wm-method-label">
+          <input type="radio" name="wm-method" value="comfy">
+          <span>
+            <strong>AI (ComfyUI)</strong>
+            <small>高品質・数十秒かかる場合あり</small>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <!-- ④ 音声オプション -->
+    <div class="wm-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="wm-keep-audio" checked>
+        <span>音声を保持する</span>
+      </label>
+    </div>
+
+    <!-- ⑤ 処理ボタン + 進捗 -->
+    <div class="wm-row">
+      <button id="wm-process-btn" class="btn-primary" disabled>ウォーターマーク除去</button>
+    </div>
+    <div id="wm-progress" style="display:none">
+      <div class="wm-spinner"></div>
+      <span>処理中… しばらくお待ちください</span>
+    </div>
+
+    <!-- ⑤ 結果 -->
+    <div id="wm-result" style="display:none">
+      <video id="wm-result-video" controls></video>
+      <div class="wm-result-actions">
+        <a id="wm-download-link" href="#" download="clean.mp4">⬇ ダウンロード (clean.mp4)</a>
+        <button id="wm-reinpaint-btn" class="btn-secondary">🔄 再インペイント</button>
+      </div>
+      <div id="wm-reinpaint-note" style="font-size:0.78rem;color:#888899;margin-top:4px;">
+        違和感が残る場合は、同じ座標・方式で再度インペインティングできます
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2742,6 +2955,8 @@
       loadLoraRegistry();
     } else if (pageId === "history") {
       renderHistory();
+    } else if (pageId === "video-edit") {
+      // 初期化は initWmPanel() 済みのため何もしない
     }
   }
 
@@ -3040,6 +3255,265 @@
   document.addEventListener("click", e => {
     if (_acDropdown && !_acDropdown.contains(e.target)) _closeAc();
   });
+
+  // ── 動画編集 (ウォーターマーク除去) ─────────────────────────────
+  (function initWmPanel() {
+    const fileInput        = $("wm-file-input");
+    const previewBtn       = $("wm-preview-btn");
+    const processBtn       = $("wm-process-btn");
+    const reinpaintBtn     = $("wm-reinpaint-btn");
+    const previewContainer = $("wm-preview-container");
+    const previewImg       = $("wm-preview-img");
+    const selectCanvas     = $("wm-select-canvas");
+    const selectHint       = $("wm-select-hint");
+    const progressDiv      = $("wm-progress");
+    const resultDiv        = $("wm-result");
+    const resultVideo      = $("wm-result-video");
+    const downloadLink     = $("wm-download-link");
+    const progressMsg      = progressDiv.querySelector("span");
+
+    let currentObjectUrl = null;
+
+    // ── ドラッグ選択ロジック ───────────────────────────────────────
+
+    let dragStart = null;   // { x, y } — Canvas（=動画）座標系
+    let dragCurrent = null;
+
+    /** マウス/タッチ位置を Canvas の描画座標系（動画ピクセル）に変換する */
+    function toCanvasPos(e) {
+      const rect  = selectCanvas.getBoundingClientRect();
+      const scaleX = selectCanvas.width  / rect.width;
+      const scaleY = selectCanvas.height / rect.height;
+      const src = e.touches ? e.touches[0] : e;
+      return {
+        x: Math.round((src.clientX - rect.left)  * scaleX),
+        y: Math.round((src.clientY - rect.top)   * scaleY),
+      };
+    }
+
+    /** 選択矩形を Canvas に描画する（dashed red rect + 半透明塗り） */
+    function drawRect(x1, y1, x2, y2) {
+      const ctx = selectCanvas.getContext("2d");
+      ctx.clearRect(0, 0, selectCanvas.width, selectCanvas.height);
+      const w = x2 - x1, h = y2 - y1;
+      if (w <= 0 || h <= 0) return;
+      ctx.fillStyle   = "rgba(255,60,60,0.18)";
+      ctx.fillRect(x1, y1, w, h);
+      ctx.strokeStyle = "#ff3333";
+      ctx.lineWidth   = Math.max(2, selectCanvas.width / 400);
+      ctx.setLineDash([Math.round(selectCanvas.width / 80), Math.round(selectCanvas.width / 160)]);
+      ctx.strokeRect(x1, y1, w, h);
+    }
+
+    /** Canvas を img の表示サイズ・動画解像度に同期する */
+    function syncCanvas() {
+      if (!previewImg.naturalWidth) return;
+      // 描画バッファ = 動画の元解像度
+      selectCanvas.width  = previewImg.naturalWidth;
+      selectCanvas.height = previewImg.naturalHeight;
+      // CSS サイズ = img の現在の表示サイズ
+      const r = previewImg.getBoundingClientRect();
+      selectCanvas.style.width  = r.width  + "px";
+      selectCanvas.style.height = r.height + "px";
+      // 既存の選択値を再描画
+      redrawFromInputs();
+    }
+
+    /** 入力フィールドの現在値で矩形を再描画する */
+    function redrawFromInputs() {
+      const x1 = parseInt($("wm-x1").value, 10) || 0;
+      const y1 = parseInt($("wm-y1").value, 10) || 0;
+      const x2 = parseInt($("wm-x2").value, 10) || 0;
+      const y2 = parseInt($("wm-y2").value, 10) || 0;
+      if (x2 > x1 && y2 > y1) drawRect(x1, y1, x2, y2);
+      else {
+        const ctx = selectCanvas.getContext("2d");
+        ctx.clearRect(0, 0, selectCanvas.width, selectCanvas.height);
+      }
+    }
+
+    // Canvas ドラッグ — mousedown / touchstart
+    selectCanvas.addEventListener("mousedown", e => {
+      e.preventDefault();
+      dragStart = toCanvasPos(e);
+      dragCurrent = { ...dragStart };
+    });
+    selectCanvas.addEventListener("touchstart", e => {
+      e.preventDefault();
+      dragStart = toCanvasPos(e);
+      dragCurrent = { ...dragStart };
+    }, { passive: false });
+
+    // Canvas ドラッグ — mousemove / touchmove
+    function onMove(e) {
+      if (!dragStart) return;
+      e.preventDefault();
+      dragCurrent = toCanvasPos(e);
+      const x1 = Math.min(dragStart.x, dragCurrent.x);
+      const y1 = Math.min(dragStart.y, dragCurrent.y);
+      const x2 = Math.max(dragStart.x, dragCurrent.x);
+      const y2 = Math.max(dragStart.y, dragCurrent.y);
+      drawRect(x1, y1, x2, y2);
+    }
+    selectCanvas.addEventListener("mousemove", onMove);
+    selectCanvas.addEventListener("touchmove",  onMove, { passive: false });
+
+    // Canvas ドラッグ — mouseup / touchend → 座標を確定してインプットに反映
+    function onEnd(e) {
+      if (!dragStart || !dragCurrent) return;
+      e.preventDefault();
+      const x1 = Math.min(dragStart.x, dragCurrent.x);
+      const y1 = Math.min(dragStart.y, dragCurrent.y);
+      const x2 = Math.max(dragStart.x, dragCurrent.x);
+      const y2 = Math.max(dragStart.y, dragCurrent.y);
+      // 最小選択サイズ（小さすぎるクリックは無視）
+      if (x2 - x1 > 5 && y2 - y1 > 5) {
+        $("wm-x1").value = x1;
+        $("wm-y1").value = y1;
+        $("wm-x2").value = x2;
+        $("wm-y2").value = y2;
+        drawRect(x1, y1, x2, y2);
+      }
+      dragStart = dragCurrent = null;
+    }
+    selectCanvas.addEventListener("mouseup",    onEnd);
+    selectCanvas.addEventListener("touchend",   onEnd, { passive: false });
+    window.addEventListener("mouseup", () => { dragStart = dragCurrent = null; });
+
+    // ウィンドウリサイズ時に Canvas CSS サイズを追従
+    window.addEventListener("resize", syncCanvas);
+
+    // 座標入力フィールドを手動変更したときも Canvas に反映
+    ["wm-x1","wm-y1","wm-x2","wm-y2"].forEach(id => {
+      $(id).addEventListener("input", redrawFromInputs);
+    });
+
+    // ── ヘルパー: 処理中 UI を切り替える ──────────────────────────
+    function setProcessing(active, method) {
+      processBtn.disabled    = active;
+      reinpaintBtn.disabled  = active;
+      progressDiv.style.display = active ? "flex" : "none";
+      if (active && progressMsg) {
+        progressMsg.textContent = method === "comfy"
+          ? "AI 処理中… ComfyUI でインペインティングしています（数十秒かかる場合があります）"
+          : "処理中… しばらくお待ちください";
+      }
+    }
+
+    // ── ヘルパー: 結果を表示する ───────────────────────────────────
+    function showResult(blob) {
+      if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = URL.createObjectURL(blob);
+      resultVideo.src         = currentObjectUrl;
+      downloadLink.href       = currentObjectUrl;
+      resultDiv.style.display = "block";
+    }
+
+    // ── コア処理: videoFile を /api/wm/process に送信 ──────────────
+    async function runProcess(videoFile, filename) {
+      const methodEl = document.querySelector('input[name="wm-method"]:checked');
+      const method   = methodEl ? methodEl.value : "telea";
+
+      setProcessing(true, method);
+
+      const fd = new FormData();
+      fd.append("video",      videoFile, filename);
+      fd.append("x1",         $("wm-x1").value);
+      fd.append("y1",         $("wm-y1").value);
+      fd.append("x2",         $("wm-x2").value);
+      fd.append("y2",         $("wm-y2").value);
+      fd.append("keep_audio", $("wm-keep-audio").checked ? "true" : "false");
+      fd.append("method",     method);
+
+      try {
+        const res = await fetch("/api/wm/process", { method: "POST", body: fd });
+        if (!res.ok) {
+          const msg = await res.text();
+          alert("除去処理エラー: " + msg);
+          return;
+        }
+        showResult(await res.blob());
+      } catch (err) {
+        alert("通信エラー: " + err.message);
+      } finally {
+        setProcessing(false);
+        processBtn.disabled = !fileInput.files[0];
+      }
+    }
+
+    // ── ファイル選択でボタンを有効化 ──────────────────────────────
+    fileInput.addEventListener("change", () => {
+      const hasFile = !!fileInput.files[0];
+      previewBtn.disabled  = !hasFile;
+      processBtn.disabled  = !hasFile;
+      resultDiv.style.display        = "none";
+      previewContainer.style.display = "none";
+      selectHint.style.display       = "none";
+      if (currentObjectUrl) {
+        URL.revokeObjectURL(currentObjectUrl);
+        currentObjectUrl = null;
+      }
+    });
+
+    // ── フレーム確認 ───────────────────────────────────────────────
+    previewBtn.addEventListener("click", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      previewBtn.disabled = true;
+      previewContainer.style.display = "none";
+      selectHint.style.display       = "none";
+
+      const fd = new FormData();
+      fd.append("video", file, file.name);
+
+      try {
+        const res = await fetch("/api/wm/preview", { method: "POST", body: fd });
+        if (!res.ok) {
+          const msg = await res.text();
+          alert("プレビュー取得エラー: " + msg);
+          return;
+        }
+        const blob = await res.blob();
+        // img.onload 後に Canvas を同期する
+        previewImg.onload = () => {
+          syncCanvas();
+          selectHint.style.display = "block";
+        };
+        previewImg.src = URL.createObjectURL(blob);
+        previewContainer.style.display = "block";
+      } catch (err) {
+        alert("通信エラー: " + err.message);
+      } finally {
+        previewBtn.disabled = false;
+      }
+    });
+
+    // ── ウォーターマーク除去（初回） ──────────────────────────────
+    processBtn.addEventListener("click", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      resultDiv.style.display = "none";
+      await runProcess(file, file.name);
+    });
+
+    // ── 再インペイント（結果動画を素材として再処理） ───────────────
+    reinpaintBtn.addEventListener("click", async () => {
+      if (!currentObjectUrl) return;
+
+      let videoFile;
+      try {
+        const res  = await fetch(currentObjectUrl);
+        const blob = await res.blob();
+        videoFile  = new File([blob], "clean.mp4", { type: "video/mp4" });
+      } catch (err) {
+        alert("動画の読み込みエラー: " + err.message);
+        return;
+      }
+
+      await runProcess(videoFile, "clean.mp4");
+    });
+  })();
 
 </script>
 
