@@ -408,6 +408,11 @@
     }
     #fav-toggle-btn:hover { background: #3a3010; }
     #fav-toggle-btn.active { background: #3a3010; border-color: #7a6020; }
+    #direct-tag-btn {
+      background: #1a1a2a; color: #7070c0; border: 1px solid #3a3a6a;
+      border-radius: 4px; padding: 4px 8px; font-size: 0.78rem; cursor: pointer;
+    }
+    #direct-tag-btn.active { background: #2a1a4a; color: #b090ff; border-color: #7050c0; }
 
     #fav-panel {
       display: none;
@@ -1220,6 +1225,7 @@
             <option value="2">2枚</option>
             <option value="4">4枚</option>
           </select>
+          <button id="direct-tag-btn" title="Danbooruタグを直接入力（LLM翻訳スキップ）">🏷 タグ直接</button>
           <span class="hint">Ctrl+Enter</span>
           <button id="generate-btn">生成</button>
         </div>
@@ -1384,6 +1390,7 @@
 
   let chatHistory    = [];
   let generating     = false;
+  let directTagMode  = false;
   let lastImageUrl   = null;
   let lastSeed       = null;
   let lastPositive   = "";
@@ -1698,7 +1705,7 @@
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
-  // ── 生成実行（Step 1: LLM 翻訳 → 確認パネル表示） ──────────────
+  // ── 生成実行（Step 1: LLM 翻訳 or タグ直接 → 確認パネル表示） ──────────────
   async function generate() {
     if (generating) return;
     const text = $("user-input").value.trim();
@@ -1709,22 +1716,29 @@
     setGenerating(true);
 
     try {
-      const d = await fetch("/api/translate", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          message:    text,
-          history:    chatHistory.slice(-6),
-          checkpoint: $("checkpoint").value,
-        }),
-      }).then(r => r.json());
+      if (directTagMode) {
+        const loraList = await fetch(
+          `/api/loras?checkpoint=${encodeURIComponent($("checkpoint").value)}`
+        ).then(r => r.json());
+        addConfirmMsg(text, "", [], text, "", Array.isArray(loraList) ? loraList : [], true);
+      } else {
+        const d = await fetch("/api/translate", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            message:    text,
+            history:    chatHistory.slice(-6),
+            checkpoint: $("checkpoint").value,
+          }),
+        }).then(r => r.json());
 
-      if (!d.ok) {
-        addMsg("assistant", "⚠ " + (d.error || "不明なエラー"));
-        return;
+        if (!d.ok) {
+          addMsg("assistant", "⚠ " + (d.error || "不明なエラー"));
+          return;
+        }
+
+        addConfirmMsg(d.positive, d.negative, d.loras, text, d.explanation || "", d.available_loras || [], false);
       }
-
-      addConfirmMsg(d.positive, d.negative, d.loras, text, d.explanation || "", d.available_loras || []);
     } catch (e) {
       addMsg("assistant", "⚠ 通信エラー: " + e.message);
     } finally {
@@ -1733,7 +1747,7 @@
   }
 
   // 確認パネルをチャットに追加
-  function addConfirmMsg(positive, negative, loras, originalText, explanation, availableLoras) {
+  function addConfirmMsg(positive, negative, loras, originalText, explanation, availableLoras, isDirectMode = false) {
     const hist = $("chat-history");
     const empty = $("chat-empty");
     if (empty) empty.remove();
@@ -1742,7 +1756,7 @@
     wrap.style.maxWidth = "100%";
     const lbl = document.createElement("div");
     lbl.className = "msg-label";
-    lbl.textContent = "AI プロンプト (確認)";
+    lbl.textContent = isDirectMode ? "タグ直接入力 (確認)" : "AI プロンプト (確認)";
     const panel = document.createElement("div");
     panel.className = "confirm-panel";
     const explanationHtml = explanation
@@ -1801,7 +1815,7 @@
 
     hist.scrollTop = hist.scrollHeight;
     panel.querySelector(".confirm-gen-btn").addEventListener("click", () => {
-      generateFromConfirmed(wrap, panel, loras, originalText);
+      generateFromConfirmed(wrap, panel, loras, originalText, isDirectMode);
     });
 
     // タグ日本語解説: tags.json で即時表示 → 未訳タグのみ LLM で補完
@@ -1844,7 +1858,7 @@
   }
 
   // Step 2: 確認済みタグで ComfyUI に送信
-  async function generateFromConfirmed(msgDiv, panel, loras, originalText) {
+  async function generateFromConfirmed(msgDiv, panel, loras, originalText, isDirectMode = false) {
     if (generating) return;
     const confirmedPos = panel.querySelector(".confirm-pos-ta").value.trim();
     const confirmedNeg = panel.querySelector(".confirm-neg-ta").value.trim();
@@ -1908,6 +1922,7 @@
           message:            originalText,
           confirmed_positive: confirmedPos,
           confirmed_negative: confirmedNeg,
+          direct_tags:        isDirectMode,
           loras:              effectiveLoras,
           checkpoint:         genCheckpoint,
           width:              parseInt($("width").value),
@@ -2036,6 +2051,13 @@
   }
 
   $("generate-btn").addEventListener("click", generate);
+  $("direct-tag-btn").addEventListener("click", () => {
+    directTagMode = !directTagMode;
+    $("direct-tag-btn").classList.toggle("active", directTagMode);
+    $("user-input").placeholder = directTagMode
+      ? "Danbooruタグをカンマ区切りで入力（例: 1girl, smile, upper body, white background）"
+      : "例：青空の下でコーヒーを飲む猫、アニメ風...";
+  });
   $("user-input").addEventListener("keydown", e => {
     if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); generate(); }
   });

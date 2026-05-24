@@ -18,6 +18,10 @@ from comfy_utils import (
     COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX, ILLUSTRIOUS_QUALITY_PREFIX,
     translate_prompt, explain_tags, review_image, submit_image_async, get_checkpoints,
 )
+from wan_utils import (
+    submit_wan_i2v_async,
+    WAN_MODEL_A14B, WAN_MODEL_A14B_LOW, WAN_ANIME_LORA,
+)
 
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 LORA_REGISTRY_FILE = pathlib.Path(__file__).parent / "loras.json"
@@ -180,7 +184,11 @@ async def handle_checkpoints(request):
 
 
 async def handle_loras_get(request):
-    return web.json_response(request.app["lora_registry"])
+    checkpoint = request.query.get("checkpoint")
+    registry = request.app["lora_registry"]
+    if checkpoint:
+        registry = _filter_loras_for_model(registry, checkpoint)
+    return web.json_response(registry)
 
 
 async def handle_loras_post(request):
@@ -377,16 +385,30 @@ async def handle_generate(request):
     negative_presets = body.get("negative_presets", [])
     confirmed_positive = body.get("confirmed_positive")
     confirmed_negative = body.get("confirmed_negative")
+    direct_tags = bool(body.get("direct_tags", False))
     valid_names = {e["filename"] for e in registry}
 
-    if confirmed_positive is not None:
-        # ユーザーが確認・編集済みのタグをそのまま使用（LLM・LoRA後処理を再実行しない）
+    if direct_tags:
+        # タグ直接入力モード: LLM翻訳をスキップし、LoRAのtrigger_words/force_tagsのみ付加する
+        positive = _dedup_tags(str(confirmed_positive or japanese_text).strip())
+        negative = str(confirmed_negative or "")
+        selected_loras = [
+            l for l in body.get("loras", [])
+            if isinstance(l, dict) and l.get("name") in valid_names
+        ]
+        registry_map = {e["filename"]: e for e in registry}
+        positive = _apply_lora_postprocess(positive, selected_loras, registry_map, checkpoint)
+    elif confirmed_positive is not None:
+        # ユーザーが確認・編集済みのタグを受け取り、LoRA後処理を再適用する。
+        # 再適用しないと確認画面でLoRAを変更してもtrigger/force_tags/衣装タグが反映されない。
         positive = _dedup_tags(str(confirmed_positive))
         negative = str(confirmed_negative or "")
         selected_loras = [
             l for l in body.get("loras", [])
             if isinstance(l, dict) and l.get("name") in valid_names
         ]
+        registry_map = {e["filename"]: e for e in registry}
+        positive = _apply_lora_postprocess(positive, selected_loras, registry_map, checkpoint)
     else:
         try:
             prompt_data = await translate_prompt(
@@ -456,6 +478,117 @@ async def handle_generate(request):
     })
 
 
+
+async def _upload_image_to_comfy(session: aiohttp.ClientSession, image_path: str) -> str:
+    """ローカルパスの画像を ComfyUI の /upload/image に送信し、ファイル名を返す。
+
+    image_path が絶対パスの場合はバイナリを読み込んでアップロードする。
+    相対ファイル名の場合は ComfyUI の input/ にすでにあるとみなしてそのまま返す。
+    """
+    if os.path.isabs(image_path):
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
+        filename = os.path.basename(image_path)
+        # asyncio.to_thread で同期 I/O をオフロード
+        data = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: open(image_path, "rb").read()
+        )
+        form = aiohttp.FormData()
+        form.add_field("image", data, filename=filename, content_type="image/png")
+        async with session.post(
+            f"{COMFY_BASE}/upload/image",
+            data=form,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            result = await resp.json(content_type=None)
+        return result.get("name", filename)
+    return image_path
+
+
+async def handle_wan_i2v(request):
+    """Wan2.2 I2V A14B カスケード 動画生成エンドポイント。
+
+    リクエスト JSON:
+      init_image    str   — 参照画像。以下のいずれかを指定:
+                            - ComfyUI input/ のファイル名（例: "tomopi_test.png"）
+                            - サーバー上の絶対パス（例: "/home/.../batch_00001_.png"）
+      message       str   — 動画の内容を説明するプロンプト
+      use_anime_lora bool — アニメ LoRA を適用するか（default: True）
+      lora_strength float — アニメ LoRA の強度 (default: 1.0)
+      width         int   — 幅 (default: 576)
+      height        int   — 高さ (default: 1024)
+      frames        int   — フレーム数 (default: 81)
+      steps         int   — サンプリングステップ数 (default: 20)
+      cfg           float — CFG スケール (default: 3.5)
+      seed          int   — シード (-1=ランダム)
+      negative      str   — ネガティブプロンプト (default: "")
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    init_image = body.get("init_image", "").strip()
+    if not init_image:
+        return web.json_response({"ok": False, "error": "init_image が必要です"}, status=400)
+
+    # A14B 2段カスケード（HighNoise+LowNoise）固定
+    unet_name      = WAN_MODEL_A14B_LOW
+    use_anime_lora = body.get("use_anime_lora", True)
+    lora_strength  = float(body.get("lora_strength", 1.0))
+    lora_name      = WAN_ANIME_LORA if use_anime_lora else None
+
+    positive = body.get("message", "").strip() or "anime girl, natural motion, high quality"
+    negative = body.get("negative", "")
+    width    = int(body.get("width",  576))
+    height   = int(body.get("height", 1024))
+    frames   = int(body.get("frames", 81))
+    fps      = int(body.get("fps",    16))
+    steps    = int(body.get("steps",  20))
+    cfg      = float(body.get("cfg",  3.5))   # A14B 公式推奨値
+    seed     = int(body.get("seed",  -1))
+    if seed == -1:
+        seed = random.randint(0, 2**32 - 1)
+
+    session = request.app["session"]
+    try:
+        # 絶対パスの場合は ComfyUI にアップロードしてファイル名を取得
+        comfy_image_name = await _upload_image_to_comfy(session, init_image)
+        result = await submit_wan_i2v_async(
+            positive=positive,
+            negative=negative,
+            seed=seed,
+            start_image=comfy_image_name,
+            session=session,
+            width=width,
+            height=height,
+            frames=frames,
+            fps=fps,
+            steps=steps,
+            cfg=cfg,
+            unet_name=unet_name,
+            lora_name=lora_name,
+            lora_strength=lora_strength,
+        )
+    except Exception as e:
+        return web.json_response({"ok": False, "error": f"Wan I2V エラー: {e}"})
+
+    if result is None:
+        model_label = "A14B" if wan_model_key == "a14b" else "5B"
+        return web.json_response({"ok": False, "error": f"Wan I2V ({model_label}) タイムアウト（1200秒経過）"})
+
+    fn = result.get("filename", "")
+    sf = result.get("subfolder", "")
+    ty = result.get("type", "output")
+    return web.json_response({
+        "ok":        True,
+        "positive":  positive,
+        "seed":      seed,
+        "image_url": f"/api/image?filename={fn}&subfolder={sf}&type={ty}",
+        "filename":  fn,
+    })
+
+
 async def handle_upload(request):
     """参照画像を ComfyUI の /upload/image に転送し、ファイル名を返す。"""
     try:
@@ -491,10 +624,11 @@ async def handle_image(request):
     subfolder = q.get("subfolder", "")
     type_     = q.get("type", "output")
 
-    url = f"{COMFY_BASE}/view?filename={filename}&subfolder={subfolder}&type={type_}"
     try:
         async with request.app["session"].get(
-            url, timeout=aiohttp.ClientTimeout(total=30)
+            f"{COMFY_BASE}/view",
+            params={"filename": filename, "subfolder": subfolder, "type": type_},
+            timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             content = await resp.read()
             ct = resp.headers.get("Content-Type", "image/png").split(";")[0]
@@ -688,9 +822,14 @@ async def handle_civitai_download(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": ".safetensors ファイルが見つかりません"}, status=404)
     target   = max(sf_files, key=lambda f: f.get("sizeKB", 0))
-    filename = target["name"]
+    # パストラバーサル対策: 外部APIのファイル名からbasename のみ抽出し拡張子・保存先を検証する
+    filename = pathlib.Path(target["name"]).name
+    if not filename.endswith(".safetensors"):
+        return web.json_response({"ok": False, "error": "不正なファイル名（.safetensors 以外）"}, status=400)
     dl_url   = target["downloadUrl"]
     dest     = LORA_DIR / filename
+    if not dest.resolve().is_relative_to(LORA_DIR.resolve()):
+        return web.json_response({"ok": False, "error": "パストラバーサル検出"}, status=400)
 
     # API キーをクエリパラメータとして付与（リダイレクト後も有効、ヘッダーは中継で落ちる）
     if CIVITAI_API_KEY:
@@ -787,6 +926,7 @@ def main():
     app.router.add_post("/api/explain-tags",       handle_explain_tags)
     app.router.add_post("/api/translate",         handle_translate)
     app.router.add_post("/api/generate",         handle_generate)
+    app.router.add_post("/api/wan-i2v",           handle_wan_i2v)
     app.router.add_post("/api/upload",           handle_upload)
     app.router.add_get("/api/image",             handle_image)
     app.router.add_post("/api/review",           handle_review)

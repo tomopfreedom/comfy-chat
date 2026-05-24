@@ -112,7 +112,11 @@ def _build_workflow(positive: str, negative: str, seed: int,
                     denoise_strength: float = 0.75,
                     mask_image: Optional[str] = None,
                     sampler_name: str = "euler_ancestral",
-                    scheduler: str = "karras") -> dict:
+                    scheduler: str = "karras",
+                    filename_prefix: str = "comfy_chat/auto",
+                    hires_scale: float = 2.0,
+                    hires_denoise: float = 0.45,
+                    ) -> dict:
     if loras is None:
         loras = []
 
@@ -274,13 +278,13 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "positive":           ["4", 0],
                 "negative":           ["5", 0],
                 "vae":                ["3", 0],
-                "upscale_by":         2.0,
+                "upscale_by":         hires_scale,
                 "seed":               seed,
                 "steps":              hires_steps,
                 "cfg":                cfg,
                 "sampler_name":       sampler_name,
                 "scheduler":          scheduler,
-                "denoise":            0.45,
+                "denoise":            hires_denoise,
                 "mode_type":          "Linear",
                 "tile_width":         512,
                 "tile_height":        512,
@@ -313,7 +317,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "seed": seed, "steps": adetail_steps, "cfg": cfg,
                 "sampler_name": sampler_name, "scheduler": scheduler,
                 "positive": ["4", 0], "negative": ["5", 0],
-                "denoise": 0.45, "feather": 5, "noise_mask": True, "force_inpaint": True,
+                "denoise": 0.55, "feather": 5, "noise_mask": True, "force_inpaint": True,
                 "bbox_threshold": 0.5, "bbox_dilation": 10, "bbox_crop_factor": 3.0,
                 "sam_detection_hint": "center-1", "sam_dilation": 0, "sam_threshold": 0.93,
                 "sam_bbox_expansion": 0, "sam_mask_hint_threshold": 0.7, "sam_mask_hint_use_negative": "False",
@@ -354,7 +358,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
 
     workflow["8"] = {
         "class_type": "SaveImage",
-        "inputs": {"images": save_image_src, "filename_prefix": "comfy_chat/auto"}
+        "inputs": {"images": save_image_src, "filename_prefix": filename_prefix}
     }
 
     return workflow
@@ -555,14 +559,19 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                               mask_image: Optional[str] = None,
                               sampler_name: str = "euler_ancestral",
                               scheduler: str = "karras",
-                              client_id: Optional[str] = None) -> Optional[dict]:
+                              client_id: Optional[str] = None,
+                              filename_prefix: str = "comfy_chat/auto",
+                              hires_scale: float = 2.0,
+                              hires_denoise: float = 0.45) -> Optional[dict]:
     if client_id is None:
         client_id = str(uuid.uuid4())
     workflow = _build_workflow(positive, negative, seed, width, height, steps, cfg,
                                ckpt_name, loras, hires_fix=hires_fix, adetail=adetail,
                                init_image=init_image, denoise_strength=denoise_strength,
                                mask_image=mask_image,
-                               sampler_name=sampler_name, scheduler=scheduler)
+                               sampler_name=sampler_name, scheduler=scheduler,
+                               filename_prefix=filename_prefix,
+                               hires_scale=hires_scale, hires_denoise=hires_denoise)
 
     async with session.post(
         f"{COMFY_BASE}/prompt",
@@ -615,3 +624,4 @@ async def submit_image_async(positive: str, negative: str, seed: int,
         return None  # 完了したが画像なし（予期しない）
 
     return None  # タイムアウト
+
