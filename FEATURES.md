@@ -102,42 +102,6 @@ comfy-chat で生成済みの画像の違和感のある部分（指・目など
 - DiT アーキテクチャ用の新規ワークフロー構築（UnetLoader ではなく専用ノードを使用）。
 - GGUF 版 Flux による 16GB VRAM での運用最適化。
 
-### 7. Anima 対応（Cosmos-Predict2 系アニメモデル）
-
-**概要**: NVIDIA Cosmos-Predict2-2B ベースのアニメ特化モデル「Anima」への対応。SDXL 系とは全く異なるアーキテクチャで、複数キャラクター描写・背景込みシーンの品質が Illustrious 系を上回ると報告されている。**Anima-Turbo（公式高速版、近日予定）のリリース後に再評価する。**
-
-**調査日**: 2026-05-15
-
-**Anima の特徴**:
-- **ベース**: NVIDIA Cosmos-Predict2-2B（SDXL 系ではない）
-- **強み**: 複数キャラクター同時描写・背景の奥行き/大気感・プロンプト追従性（自然言語＋Danbooru タグ両対応）
-- **弱点**: 推論速度（BF16対応GPUでも約3倍遅い）・LoRAエコシステム未成熟・アーティストスタイルドリフト（RoPE構造的問題）・衣装色指定の忠実度が低い
-- **速度改善策**: `--fp16-unet` + TorchCompileModel で最大75%改善。Anima-Turbo 待ち
-- **ライセンス**: 生成画像の商用利用は可、モデル本体の商用サービス組み込みは不可
-
-**comfy-chat への実装方針**:
-- `_build_workflow()` を全面書き換え（Flux対応と同規模）
-  - `CheckpointLoader`（ノード1）→ `UNETLoader` + `CLIPLoader` + `VAELoader` に分離
-  - `CLIPSkip`（ノード20）不要
-  - `KSampler` → `SamplerCustomAdvanced` 等 Cosmos 系サンプラーに変更
-  - 推奨サンプラー: `er_sde`（シャープ）/ `euler_a`（柔らか）、ステップ数 30〜50、CFG 4〜6
-- `system_prompt.py` に Anima 向けプロンプト定数を追加（タグ＋自然言語ハイブリッド）
-- `_ckpt_type()` に `anima` 判定を追加し LoRA フィルタ・システムプロンプトを切り替え
-- LoRA は Anima 互換品に差し替えが必要（WAI-Anima 等が候補）
-
-**ファイル配置**:
-```
-anima-base-v1.0.safetensors  (3.89GB, bf16)  → ComfyUI/models/diffusion_models/
-qwen_3_06b_base.safetensors  (1.11GB)        → ComfyUI/models/text_encoders/
-qwen_image_vae.safetensors   (242MB)         → ComfyUI/models/vae/
-```
-
-**ダウンロード先**: `circlestone-labs/Anima`（HuggingFace）/ CivitAI [Anima Official]
-
-**再評価トリガー**:
-- Anima-Turbo リリースで速度差が 1.5倍以内に縮まったとき
-- Illustrious 互換 LoRA の Anima 移植が進んだとき
-
 ---
 
 ## 優先度: 高
@@ -147,13 +111,6 @@ qwen_image_vae.safetensors   (242MB)         → ComfyUI/models/vae/
 
 ## 優先度: 低
 
-### 4. ControlNet 対応
-**概要**: 参照画像でポーズ・ラインアートなどの構図を制御。
-**実装方針**:
-- `_build_workflow()` に ControlNet ノード群（300番台）を追加。
-- UI にコントロールタイプ選択（openpose / canny / depth / lineart）と強度スライダーを追加。
-- E5（AdvancedControlNet）とセットで実装することを推奨（強度制御なしは過剰適用しやすい）。
-
 ### 5. 会話コンテキスト管理（タブ/スレッド）
 **概要**: セッションをタブに分割し、タブごとに独立した会話履歴を保持する。フロントエンドの大幅改修が必要。
 
@@ -161,7 +118,7 @@ qwen_image_vae.safetensors   (242MB)         → ComfyUI/models/vae/
 
 # ComfyUI カスタムノード（Extension）による拡張候補
 
-現在インストール済み: `ComfyUI-Impact-Pack`（ADetailer）のみ。
+現在インストール済み: `ComfyUI-Impact-Pack`（ADetailer）、`comfyui_controlnet_aux`（ControlNet プリプロセッサ）、`ComfyUI_IPAdapter_plus`（IP-Adapter）。
 `_build_workflow()` にノードを追加するだけで統合できる。
 
 ## 優先度: 高
@@ -175,14 +132,6 @@ qwen_image_vae.safetensors   (242MB)         → ComfyUI/models/vae/
 
 ## 優先度: 中
 
-### E2. IP-Adapter（参照画像スタイル転写）
-**Extension**: `ComfyUI_IPAdapter_plus`
-**概要**: アップロードした参照画像のスタイル・キャラクター・雰囲気を生成画像に転写する。img2img より自然で柔軟な転写が可能。
-**実装方針**:
-- UI に「スタイル参照画像」アップロード欄と強度スライダーを追加。
-- `_build_workflow()` に IP-Adapter ノード群（500番台）を追加し、KSampler の conditioning に接続。
-- `IPAdapterModelLoader` + `IPAdapterApply` の 2 ノード構成。
-
 ### E4. Inpaint Crop & Stitch（高品質インペイント）
 **Extension**: `ComfyUI-Inpaint-CropAndStitch`
 **概要**: マスク領域を切り抜いて高解像度でインペイントし、元画像に貼り戻す。全体解像度で処理する現行実装より顔・手の細部が大幅向上。ADetailer との相乗効果が高い。
@@ -195,10 +144,3 @@ qwen_image_vae.safetensors   (242MB)         → ComfyUI/models/vae/
 **実装方針**:
 - 生成完了後に「✨ 画質向上」ボタンを追加し、SUPIR ワークフローを別途実行。
 
-## 優先度: 低
-
-### E5. AdvancedControlNet（ControlNet 強度制御）
-**Extension**: `ComfyUI-Advanced-ControlNet`
-**概要**: ControlNet の条件付け強度をサンプリングステップごとに制御。#4 の ControlNet 実装後に必要になる（単独では意味をなさない）。
-**実装方針**:
-- 標準 `ControlNetApply` の代替として使用。ステップ範囲指定（start/end %）で過剰適用を防止。
