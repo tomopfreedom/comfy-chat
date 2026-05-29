@@ -14,7 +14,10 @@ from typing import Optional
 
 import aiohttp
 
-from system_prompt import PONY_SYSTEM_PROMPT, SDXL_SYSTEM_PROMPT, FLUX_SYSTEM_PROMPT, ILLUSTRIOUS_SYSTEM_PROMPT
+from system_prompt import (
+    PONY_SYSTEM_PROMPT, SDXL_SYSTEM_PROMPT, FLUX_SYSTEM_PROMPT,
+    ILLUSTRIOUS_SYSTEM_PROMPT, ANIMA_SYSTEM_PROMPT,
+)
 
 LLAMA_URL = "http://localhost:11434/v1/chat/completions"
 COMFY_BASE = "http://localhost:8188"
@@ -34,6 +37,11 @@ PONY_QUALITY_PREFIX = (
     "bright lighting, colorful, (depth of field:1.3), detailed eyes"
 )
 ILLUSTRIOUS_QUALITY_PREFIX = "masterpiece, best quality, newest, absurdres, highres"
+_CONTROLNET_MODELS = {
+    "openpose": "openpose-sdxl.safetensors",
+    "canny":    "canny-sdxl.safetensors",
+}
+ANIMA_QUALITY_PREFIX = "best quality, highly detailed, anime style"
 POLL_TIMEOUT = 300
 
 
@@ -57,7 +65,9 @@ def _extract_json(text: str) -> dict:
 
 def _select_system_prompt(ckpt_name: str) -> str:
     name = ckpt_name.lower()
-    if "pony" in name:
+    if "anima" in name or "narni" in name:
+        return ANIMA_SYSTEM_PROMPT
+    elif "pony" in name:
         return PONY_SYSTEM_PROMPT
     elif "flux" in name:
         return FLUX_SYSTEM_PROMPT
@@ -116,6 +126,11 @@ def _build_workflow(positive: str, negative: str, seed: int,
                     filename_prefix: str = "comfy_chat/auto",
                     hires_scale: float = 2.0,
                     hires_denoise: float = 0.45,
+                    ref_image: Optional[str] = None,
+                    ip_adapter_strength: float = 0.5,
+                    controlnet_image: Optional[str] = None,
+                    controlnet_type: str = "openpose",
+                    controlnet_strength: float = 0.8,
                     ) -> dict:
     if loras is None:
         loras = []
@@ -123,6 +138,15 @@ def _build_workflow(positive: str, negative: str, seed: int,
     # CLIP Skip 判定: Pony, NoobAI, Illustrious 系は -2、それ以外は -1
     name_l = ckpt_name.lower()
     clip_skip = -2 if ("pony" in name_l or "noob" in name_l or "illustrious" in name_l) else -1
+    is_anima_base = ckpt_name == "Anima-base"
+    is_anima = is_anima_base or "anima" in name_l or "narni" in name_l
+    # Anima (Qwen Vision) requires its own sampler settings; intentionally overrides caller-supplied values
+    if is_anima:
+        hires_fix = False
+        steps = 20
+        cfg = 3.5
+        sampler_name = "euler"
+        scheduler = "simple"
 
     # ワークフロー辞書の初期化
     workflow = {}
@@ -147,6 +171,37 @@ def _build_workflow(positive: str, negative: str, seed: int,
         }
         model_src_base = ["22", 0]
         clip_src_base  = ["21", 0]
+        vae_src = ["3", 0]
+    elif is_anima_base:
+        # Anima 分割ファイル構成（UNETLoader + CLIPLoader + VAELoader）
+        workflow["1"] = {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "anima-base-v1.0.safetensors", "weight_dtype": "default"}
+        }
+        workflow["2"] = {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "qwen_3_06b_base.safetensors", "type": "qwen_image"}
+        }
+        workflow["3"] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": "qwen_image_vae.safetensors"}
+        }
+        model_src_base = ["1", 0]
+        clip_src_base  = ["2", 0]
+        vae_src = ["3", 0]
+    elif is_anima:
+        # Anima マージ済みチェックポイント（nArnima Turbo 等、CheckpointLoaderSimple）
+        workflow["1"] = {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {"ckpt_name": ckpt_name}
+        }
+        workflow["3"] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": "qwen_image_vae.safetensors"}
+        }
+        model_src_base = ["1", 0]
+        clip_src_base  = ["1", 1]
+        vae_src = ["3", 0]
     else:
         workflow["1"] = {
             "class_type": "CheckpointLoaderSimple",
@@ -162,6 +217,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
         }
         model_src_base = ["1", 0]
         clip_src_base  = ["20", 0]
+        vae_src = ["3", 0]
 
     # 2. LoRA ノードを 100 番台で直列に連結
     prev_model, prev_clip = model_src_base, clip_src_base
@@ -183,6 +239,34 @@ def _build_workflow(positive: str, negative: str, seed: int,
     
     model_src = prev_model
     clip_src  = prev_clip
+
+    if ref_image and not is_anima:
+        workflow["500"] = {
+            "class_type": "IPAdapterUnifiedLoader",
+            "inputs": {
+                "model": model_src,
+                "preset": "PLUS (high strength)",
+            },
+        }
+        workflow["501"] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": ref_image, "upload": "image"},
+        }
+        workflow["502"] = {
+            "class_type": "IPAdapterAdvanced",
+            "inputs": {
+                "model":          ["500", 0],
+                "ipadapter":      ["500", 1],
+                "image":          ["501", 0],
+                "weight":         ip_adapter_strength,
+                "weight_type":    "style transfer",
+                "combine_embeds": "concat",
+                "start_at":       0.0,
+                "end_at":         1.0,
+                "embeds_scaling": "V only",
+            },
+        }
+        model_src = ["502", 0]
 
     # 3. Latent 入力の決定 (txt2img / img2img / Inpaint)
     if init_image:
@@ -223,7 +307,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "class_type": "VAEEncodeForInpaint",
                 "inputs": {
                     "pixels":       ["35", 0],
-                    "vae":          ["3", 0],
+                    "vae":          vae_src,
                     "mask":         ["33", 0],
                     "grow_mask_by": 6,
                 },
@@ -232,15 +316,16 @@ def _build_workflow(positive: str, negative: str, seed: int,
         else:
             workflow["31"] = {
                 "class_type": "VAEEncode",
-                "inputs": {"pixels": ["35", 0], "vae": ["3", 0]},
+                "inputs": {"pixels": ["35", 0], "vae": vae_src},
             }
             latent_src = ["31", 0]
     else:
-        workflow["2"] = {
+        latent_node_id = "30" if is_anima_base else "2"
+        workflow[latent_node_id] = {
             "class_type": "EmptyLatentImage",
             "inputs": {"width": width, "height": height, "batch_size": 1},
         }
-        latent_src = ["2", 0]
+        latent_src = [latent_node_id, 0]
 
     base_denoise = denoise_strength if init_image else 1.0
 
@@ -250,16 +335,73 @@ def _build_workflow(positive: str, negative: str, seed: int,
               "inputs": {"text": positive, "clip": clip_src}},
         "5": {"class_type": "CLIPTextEncode",
               "inputs": {"text": negative, "clip": clip_src}},
+    })
+    positive_src = ["4", 0]
+    negative_src = ["5", 0]
+
+    if controlnet_image and not is_anima:
+        cnet_model = _CONTROLNET_MODELS.get(controlnet_type, "openpose-sdxl.safetensors")
+
+        workflow["300"] = {
+            "class_type": "ControlNetLoader",
+            "inputs": {"control_net_name": cnet_model},
+        }
+        workflow["301"] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": controlnet_image, "upload": "image"},
+        }
+
+        if controlnet_type == "openpose":
+            workflow["302"] = {
+                "class_type": "DWPreprocessor",
+                "inputs": {
+                    "image":       ["301", 0],
+                    "detect_hand": "enable",
+                    "detect_body": "enable",
+                    "detect_face": "enable",
+                    "resolution":  512,
+                },
+            }
+            cn_image_src = ["302", 0]
+        elif controlnet_type == "canny":
+            workflow["302"] = {
+                "class_type": "Canny",
+                "inputs": {
+                    "image":          ["301", 0],
+                    "low_threshold":  100,
+                    "high_threshold": 200,
+                },
+            }
+            cn_image_src = ["302", 0]
+        else:
+            cn_image_src = ["301", 0]
+
+        workflow["303"] = {
+            "class_type": "ControlNetApplyAdvanced",
+            "inputs": {
+                "positive":      positive_src,
+                "negative":      negative_src,
+                "control_net":   ["300", 0],
+                "image":         cn_image_src,
+                "strength":      controlnet_strength,
+                "start_percent": 0.0,
+                "end_percent":   1.0,
+            },
+        }
+        positive_src = ["303", 0]
+        negative_src = ["303", 1]
+
+    workflow.update({
         "6": {"class_type": "KSampler",
               "inputs": {
                   "seed": seed, "steps": steps, "cfg": cfg,
                   "sampler_name": sampler_name, "scheduler": scheduler,
                   "denoise": base_denoise, "model": model_src,
-                  "positive": ["4", 0], "negative": ["5", 0],
+                  "positive": positive_src, "negative": negative_src,
                   "latent_image": latent_src,
               }},
         "7": {"class_type": "VAEDecode",
-              "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
+              "inputs": {"samples": ["6", 0], "vae": vae_src}},
     })
 
     # 5. Hires fix (UltimateSDUpscale によるタイル分割 2x アップスケール)
@@ -277,7 +419,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
                 "model":              model_src,
                 "positive":           ["4", 0],
                 "negative":           ["5", 0],
-                "vae":                ["3", 0],
+                "vae":                vae_src,
                 "upscale_by":         hires_scale,
                 "seed":               seed,
                 "steps":              hires_steps,
@@ -312,7 +454,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
         workflow["201"] = {
             "class_type": "FaceDetailer",
             "inputs": {
-                "image": base_image_src, "model": model_src, "clip": clip_src, "vae": ["3", 0],
+                "image": base_image_src, "model": model_src, "clip": clip_src, "vae": vae_src,
                 "guide_size": 384, "guide_size_for": True, "max_size": 1024,
                 "seed": seed, "steps": adetail_steps, "cfg": cfg,
                 "sampler_name": sampler_name, "scheduler": scheduler,
@@ -338,7 +480,7 @@ def _build_workflow(positive: str, negative: str, seed: int,
         workflow["204"] = {
             "class_type": "DetailerForEach",
             "inputs": {
-                "image": ["201", 0], "segs": ["203", 0], "model": model_src, "clip": clip_src, "vae": ["3", 0],
+                "image": ["201", 0], "segs": ["203", 0], "model": model_src, "clip": clip_src, "vae": vae_src,
                 "guide_size": 384, "guide_size_for": True, "max_size": 1024,
                 "seed": seed, "steps": adetail_steps, "cfg": cfg,
                 "sampler_name": sampler_name, "scheduler": scheduler,
@@ -562,7 +704,12 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                               client_id: Optional[str] = None,
                               filename_prefix: str = "comfy_chat/auto",
                               hires_scale: float = 2.0,
-                              hires_denoise: float = 0.45) -> Optional[dict]:
+                              hires_denoise: float = 0.45,
+                              ref_image: Optional[str] = None,
+                              ip_adapter_strength: float = 0.5,
+                              controlnet_image: Optional[str] = None,
+                              controlnet_type: str = "openpose",
+                              controlnet_strength: float = 0.8) -> Optional[dict]:
     if client_id is None:
         client_id = str(uuid.uuid4())
     workflow = _build_workflow(positive, negative, seed, width, height, steps, cfg,
@@ -571,7 +718,11 @@ async def submit_image_async(positive: str, negative: str, seed: int,
                                mask_image=mask_image,
                                sampler_name=sampler_name, scheduler=scheduler,
                                filename_prefix=filename_prefix,
-                               hires_scale=hires_scale, hires_denoise=hires_denoise)
+                               hires_scale=hires_scale, hires_denoise=hires_denoise,
+                               ref_image=ref_image, ip_adapter_strength=ip_adapter_strength,
+                               controlnet_image=controlnet_image,
+                               controlnet_type=controlnet_type,
+                               controlnet_strength=controlnet_strength)
 
     async with session.post(
         f"{COMFY_BASE}/prompt",
@@ -624,4 +775,3 @@ async def submit_image_async(positive: str, negative: str, seed: int,
         return None  # 完了したが画像なし（予期しない）
 
     return None  # タイムアウト
-

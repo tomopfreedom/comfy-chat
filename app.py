@@ -16,6 +16,7 @@ from aiohttp import web
 
 from comfy_utils import (
     COMFY_BASE, LLM_MODEL, PONY_QUALITY_PREFIX, ILLUSTRIOUS_QUALITY_PREFIX,
+    ANIMA_QUALITY_PREFIX,
     translate_prompt, explain_tags, review_image, submit_image_async, get_checkpoints,
 )
 from wan_utils import (
@@ -102,6 +103,8 @@ def _dedup_tags(prompt: str) -> str:
 def _ckpt_type(ckpt_name: str) -> str:
     """チェックポイント名からベースモデル種別を返す。"""
     name = ckpt_name.lower()
+    if "anima" in name or "narni" in name:
+        return "anima"
     if "pony" in name:
         return "pony"
     if "flux" in name:
@@ -119,7 +122,12 @@ def _filter_loras_for_model(registry: list, ckpt_name: str) -> list:
     illustrious チェックポイントは sdxl LoRA とも互換（同一 SDXL ベース）。
     """
     ckpt = _ckpt_type(ckpt_name)
-    allowed = (ckpt, "any") if ckpt != "illustrious" else ("illustrious", "sdxl", "any")
+    if ckpt == "illustrious":
+        allowed = ("illustrious", "sdxl", "any")
+    elif ckpt == "anima":
+        allowed = ("anima", "any")
+    else:
+        allowed = (ckpt, "any")
     return [e for e in registry if e.get("base_model", "any") in allowed]
 
 
@@ -169,6 +177,8 @@ def _apply_lora_postprocess(positive: str, selected_loras: list, registry_map: d
         positive = PONY_QUALITY_PREFIX + ", " + positive
     elif ckpt_kind == "illustrious":
         positive = ILLUSTRIOUS_QUALITY_PREFIX + ", " + positive
+    elif ckpt_kind == "anima":
+        positive = ANIMA_QUALITY_PREFIX + ", " + positive
 
     return _dedup_tags(positive)
 
@@ -184,6 +194,9 @@ async def handle_checkpoints(request):
     # Z-image-Turbo (split) を仮想的に追加
     if "Z-image-Turbo" not in checkpoints:
         checkpoints.append("Z-image-Turbo")
+    # Anima-base (UNET/CLIP/VAE split) を仮想的に追加
+    if "Anima-base" not in checkpoints:
+        checkpoints.append("Anima-base")
     return web.json_response({"checkpoints": checkpoints})
 
 
@@ -213,7 +226,7 @@ async def handle_loras_post(request):
         return web.json_response({"ok": False, "error": "既に登録済みです"}, status=400)
 
     base_model = body.get("base_model", "any")
-    if base_model not in ("pony", "sdxl", "flux", "illustrious", "any"):
+    if base_model not in ("pony", "sdxl", "flux", "illustrious", "anima", "any"):
         base_model = "any"
 
     entry = {
@@ -258,7 +271,7 @@ async def handle_loras_patch(request):
 
     if "base_model" in body:
         bm = body["base_model"]
-        if bm not in ("pony", "sdxl", "flux", "illustrious", "any"):
+        if bm not in ("pony", "sdxl", "flux", "illustrious", "anima", "any"):
             return web.json_response({"ok": False, "error": "無効な base_model です"}, status=400)
         entry["base_model"] = bm
 
@@ -376,6 +389,17 @@ async def handle_generate(request):
     init_image       = body.get("init_image") or None
     mask_image       = body.get("mask_image") or None
     denoise_strength = float(body.get("denoise", 0.75))
+    ref_image           = body.get("ref_image") or None
+    try:
+        ip_adapter_strength = float(body.get("ip_adapter_strength", 0.5))
+    except (ValueError, TypeError):
+        ip_adapter_strength = 0.5
+    controlnet_image    = body.get("controlnet_image") or None
+    controlnet_type     = body.get("controlnet_type", "openpose")
+    try:
+        controlnet_strength = float(body.get("controlnet_strength", 0.8))
+    except (ValueError, TypeError):
+        controlnet_strength = 0.8
     sampler_name = body.get("sampler", "euler_ancestral")
     scheduler    = body.get("scheduler", "karras")
     if seed == -1:
@@ -445,6 +469,11 @@ async def handle_generate(request):
             hires_fix=hires_fix, adetail=adetail,
             init_image=init_image, denoise_strength=denoise_strength,
             mask_image=mask_image,
+            ref_image=ref_image,
+            ip_adapter_strength=ip_adapter_strength,
+            controlnet_image=controlnet_image,
+            controlnet_type=controlnet_type,
+            controlnet_strength=controlnet_strength,
             sampler_name=sampler_name, scheduler=scheduler,
             client_id=client_id if i == 0 else str(uuid.uuid4()),
         )
@@ -578,7 +607,7 @@ async def handle_wan_i2v(request):
         return web.json_response({"ok": False, "error": f"Wan I2V エラー: {e}"})
 
     if result is None:
-        model_label = "A14B" if wan_model_key == "a14b" else "5B"
+        model_label = "A14B"
         return web.json_response({"ok": False, "error": f"Wan I2V ({model_label}) タイムアウト（1200秒経過）"})
 
     fn = result.get("filename", "")
