@@ -141,11 +141,12 @@ def _build_workflow(positive: str, negative: str, seed: int,
     is_anima_base = ckpt_name == "Anima-base"
     is_anima = is_anima_base or "anima" in name_l or "narni" in name_l
     # Anima (Qwen Vision) requires its own sampler settings; intentionally overrides caller-supplied values
+    # Official values from AnimaLoraToolkit: steps=25, cfg=4.0, er_sde, simple
     if is_anima:
         hires_fix = False
-        steps = 20
-        cfg = 3.5
-        sampler_name = "euler"
+        steps = 25
+        cfg = 4.0
+        sampler_name = "er_sde"
         scheduler = "simple"
 
     # ワークフロー辞書の初期化

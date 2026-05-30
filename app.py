@@ -28,6 +28,7 @@ from wan_utils import (
     WAN_MODEL_A14B, WAN_MODEL_A14B_LOW, WAN_ANIME_LORA,
 )
 from lightx2v_utils import run_lightx2v_i2v, is_available as lightx2v_available
+from tts_wan_utils import run_voiced_wan_pipeline, run_auto_voiced_video_pipeline, VOICED_OUTPUT_DIR
 from wm_utils import (
     get_first_frame_jpeg, remove_watermark_video, _validate_video,
 )
@@ -1273,6 +1274,155 @@ async def handle_wm_process(request: web.Request) -> web.Response:
     )
 
 
+# ──── 音声付き WAN 動画 ──────────────────────────────────────────
+
+async def handle_voiced_wan(request):
+    """Irodori-TTS + WAN I2V で音声付き MP4 を生成する。
+
+    リクエスト JSON:
+      init_image   str   — 参照画像（ComfyUI input/ のファイル名 or 絶対パス）
+      message      str   — 動画シーンの説明（WANプロンプトとして使用）
+      voice_text   str   — TTSに渡すセリフ（省略時はLLMが自動生成）
+      fps          int   — フレームレート (default: 16)
+      width        int   — 幅 (default: 576)
+      height       int   — 高さ (default: 1024)
+      steps        int   — サンプリングステップ数 (default: 20)
+      cfg          float — CFG スケール (default: 3.5)
+      seed         int   — シード (-1=ランダム)
+      use_anime_lora bool — アニメ LoRA を適用するか (default: True)
+
+    レスポンス:
+      {"ok": true, "video_url": "/api/voiced-wan-video?id=...", "voice_text": "...",
+       "frames": 81, "duration": 5.1, "seed": 12345}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    init_image = body.get("init_image", "").strip()
+    if not init_image:
+        return web.json_response({"ok": False, "error": "init_image が必要です"}, status=400)
+
+    scene      = body.get("message", "").strip() or "anime girl, natural motion, high quality"
+    voice_text = body.get("voice_text", "").strip() or None
+    fps        = int(body.get("fps",    16))
+    width      = int(body.get("width",  576))
+    height     = int(body.get("height", 1024))
+    steps      = int(body.get("steps",  20))
+    cfg        = float(body.get("cfg",  3.5))
+    seed       = int(body.get("seed",  -1))
+    use_lora   = bool(body.get("use_anime_lora", True))
+
+    session = request.app["session"]
+    job_id  = uuid.uuid4().hex
+
+    _stop_llama_server()
+    try:
+        comfy_image = await _upload_image_to_comfy(session, init_image)
+        result = await run_voiced_wan_pipeline(
+            scene=scene,
+            voice_text=voice_text,
+            init_image=comfy_image,
+            session=session,
+            fps=fps,
+            width=width,
+            height=height,
+            steps=steps,
+            cfg=cfg,
+            seed=seed,
+            use_anime_lora=use_lora,
+            job_id=job_id,
+        )
+    except Exception as e:
+        asyncio.create_task(_restart_llama_server(session))
+        return web.json_response({"ok": False, "error": str(e)})
+
+    asyncio.create_task(_restart_llama_server(session))
+    return web.json_response({
+        "ok":         True,
+        "video_url":  f"/api/voiced-wan-video?id={job_id}",
+        "voice_text": result["voice_text"],
+        "frames":     result["frames"],
+        "duration":   result["duration"],
+        "seed":       result["seed"],
+    })
+
+
+async def handle_auto_voiced_video(request):
+    """シナリオ生成 → Anima画像生成＋TTS並列 → LightX2V動画 → MP4 のフルオート動画生成。
+
+    リクエスト JSON:
+      message    str   — 動画の内容を日本語で指示（例: 「ともぴが笑顔で手を振る」）
+      fps        int   — フレームレート (default: 16)
+      img_steps  int   — Anima 画像生成ステップ数 (default: 25)
+      img_cfg    float — Anima CFG スケール (default: 4.5)
+      seed       int   — シード (-1=ランダム)
+
+    レスポンス:
+      {"ok": true, "video_url": "...", "tags": "...", "environment": "...",
+       "dialogue": "...", "frames": 81, "duration": 5.1, "seed": 12345}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    user_message = body.get("message", "").strip()
+    if not user_message:
+        return web.json_response({"ok": False, "error": "message が必要です"}, status=400)
+
+    fps       = int(body.get("fps",       16))
+    img_steps = int(body.get("img_steps", 25))
+    img_cfg   = float(body.get("img_cfg", 4.5))
+    seed      = int(body.get("seed",      -1))
+
+    session = request.app["session"]
+    job_id  = uuid.uuid4().hex
+
+    # llama-server 停止はパイプライン内部（シナリオ生成完了後）で行う
+    try:
+        result = await run_auto_voiced_video_pipeline(
+            user_message=user_message,
+            session=session,
+            fps=fps,
+            img_steps=img_steps,
+            img_cfg=img_cfg,
+            seed=seed,
+            job_id=job_id,
+        )
+    except Exception as e:
+        asyncio.create_task(_restart_llama_server(session))
+        return web.json_response({"ok": False, "error": str(e)})
+
+    asyncio.create_task(_restart_llama_server(session))
+    return web.json_response({
+        "ok":         True,
+        "video_url":  f"/api/voiced-wan-video?id={job_id}",
+        "tags":       result["tags"],
+        "environment": result["environment"],
+        "dialogue":   result["dialogue"],
+        "frames":     result["frames"],
+        "duration":   result["duration"],
+        "seed":       result["seed"],
+    })
+
+
+async def handle_voiced_wan_video(request):
+    """生成済み音声付き MP4 を返す。"""
+    job_id = request.rel_url.query.get("id", "")
+    if not job_id or not re.match(r"^[0-9a-f]{32}$", job_id):
+        return web.Response(status=400, text="id が不正です")
+    path = str(VOICED_OUTPUT_DIR / f"{job_id}.mp4")
+    if not os.path.isfile(path):
+        return web.Response(status=404, text="File not found")
+    # パストラバーサル防止
+    allowed = os.path.abspath(str(VOICED_OUTPUT_DIR))
+    if not os.path.abspath(path).startswith(allowed + os.sep):
+        return web.Response(status=403, text="Forbidden")
+    return web.FileResponse(path)
+
+
 # ──── アプリ起動 ──────────────────────────────────────────────────
 
 async def on_startup(app):
@@ -1317,6 +1467,9 @@ def main():
     app.router.add_post("/api/comfyui/start",     handle_comfyui_start)
     app.router.add_post("/api/lightx2v-i2v",      handle_lightx2v_i2v)
     app.router.add_get("/api/lightx2v-video",     handle_lightx2v_video)
+    app.router.add_post("/api/voiced-wan",          handle_voiced_wan)
+    app.router.add_post("/api/auto-voiced-video",  handle_auto_voiced_video)
+    app.router.add_get("/api/voiced-wan-video",    handle_voiced_wan_video)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
     app.router.add_get("/api/civitai/model",     handle_civitai_model)
