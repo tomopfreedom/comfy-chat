@@ -1854,8 +1854,9 @@
 
     <!-- 進捗 -->
     <div id="vg-progress" style="display:none; margin-top:16px; text-align:center;">
-      <p id="vg-status-text" style="margin-bottom:8px;">⏳ LLM を停止して Wan2.2 I2V 処理中... 最大40分程度かかります（LLM は生成完了後に自動再起動）</p>
-      <progress style="width:100%;"></progress>
+      <p id="vg-status-text" style="margin-bottom:4px;">⏳ LLM を停止して Wan2.2 I2V 処理中...</p>
+      <p id="vg-progress-text" style="margin-bottom:6px; font-size:0.85rem; color:#666;"></p>
+      <progress id="vg-progress-bar" style="width:100%;" max="100" value="0"></progress>
     </div>
 
     <!-- エラー -->
@@ -4323,13 +4324,15 @@
       }
     }
 
+    const progressText = $("vg-progress-text");
+    const progressBar  = $("vg-progress-bar");
+
     // ── 生成 ──────────────────────────────────────────────────────────────
     genBtn.addEventListener("click", async () => {
       if (!vgUploadedName) {
-        showVgError("参照画像を選択してください。");  // [LOW] 黙って return しない
+        showVgError("参照画像を選択してください。");
         return;
       }
-
       const prompt = $("vg-prompt").value.trim();
       if (!prompt) {
         showVgError("プロンプトを入力してください。");
@@ -4339,6 +4342,8 @@
       setVgGenerating(true);
       errorDiv.style.display = "none";
       resultDiv.style.display = "none";
+      progressText.textContent = "";
+      progressBar.value = 0;
 
       const payload = {
         init_image:     vgUploadedName,
@@ -4355,33 +4360,51 @@
         seed:           parseInt($("vg-seed").value),
       };
 
-      // サーバー側 2400秒 より余裕をもって 60秒 長い 2460秒 で制限
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 2460 * 1000);
-
       try {
-        const res = await fetch("/api/wan-i2v", {
-          method:  "POST",
+        // Step 1: キューに入れて prompt_id を受け取る（即レスポンス）
+        const initRes = await fetch("/api/wan-i2v", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify(payload),
-          signal:  controller.signal,
+          body: JSON.stringify(payload),
         });
-        clearTimeout(tid);
+        if (!initRes.ok) throw new Error("HTTP " + initRes.status);
+        const initData = await initRes.json();
+        if (!initData.ok) throw new Error(initData.error || "送信に失敗しました");
+        const promptId = initData.prompt_id;
 
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || "生成に失敗しました");
-        if (!data.image_url) throw new Error("生成結果URLがありません");  // [LOW]
+        // Step 2: 4秒ごとにポーリングして進捗表示
+        while (true) {
+          await new Promise(r => setTimeout(r, 4000));
+          const prog = await fetch(`/api/wan-i2v/progress/${promptId}`)
+            .then(r => r.json())
+            .catch(() => ({ status: "running", stage: 0, step: 0, total_steps: 0, eta_seconds: 0 }));
 
-        showVgResult(data.image_url);
+          if (prog.status === "done") {
+            if (!prog.image_url) throw new Error("生成結果URLがありません");
+            showVgResult(prog.image_url);
+            break;
+          }
+          if (prog.status === "error") throw new Error(prog.error || "ComfyUI エラー");
+
+          // 進捗テキストとバーを更新
+          const stageLabel = prog.stage >= 2 ? "Stage 2/2（精細化）"
+                           : prog.stage === 1 ? "Stage 1/2（粗生成）"
+                           : "準備中...";
+          const stepInfo = prog.total_steps > 0 ? ` ${prog.step}/${prog.total_steps} ステップ` : "";
+          const etaStr   = prog.eta_seconds > 0  ? `  残り約 ${Math.ceil(prog.eta_seconds / 60)} 分` : "";
+          progressText.textContent = stageLabel + stepInfo + etaStr;
+          if (prog.total_steps > 0) {
+            const base = prog.stage >= 2 ? 50 : 0;
+            progressBar.value = base + (prog.step / prog.total_steps) * 50;
+          }
+          checkHealth();
+        }
       } catch (err) {
-        clearTimeout(tid);
-        const msg = err.name === "AbortError"
-          ? "タイムアウト — ComfyUI の状態を確認してください"
-          : "生成エラー: " + err.message;
-        showVgError(msg);
+        showVgError("生成エラー: " + err.message);
       } finally {
         setVgGenerating(false);
+        progressText.textContent = "";
+        progressBar.value = 0;
       }
     });
 

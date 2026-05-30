@@ -231,7 +231,84 @@ def _build_wan_a14b_workflow(
     return workflow
 
 
-# ──── 送信 & ポーリング ──────────────────────────────────────────────
+# ──── 送信（即返し）& 完了チェック ────────────────────────────────────
+
+async def queue_wan_i2v_async(
+        positive: str,
+        negative: str,
+        seed: int,
+        start_image: str,
+        session: aiohttp.ClientSession,
+        width: int = 576,
+        height: int = 1024,
+        frames: int = 81,
+        fps: int = 16,
+        steps: int = 20,
+        cfg: float = 5.0,
+        sampler_name: str = "uni_pc",
+        scheduler: str = "simple",
+        unet_name: str = WAN_MODEL_A14B_LOW,
+        lora_name: Optional[str] = None,
+        lora_strength: float = 1.0,
+        filename_prefix: str = "wan_i2v/wan") -> str:
+    """ワークフローをキューに入れて prompt_id を即返す（完了は待たない）。"""
+    client_id = str(uuid.uuid4())
+    workflow = _build_wan_a14b_workflow(
+        positive=positive, negative=negative, seed=seed,
+        start_image=start_image, width=width, height=height,
+        frames=frames, fps=fps, steps=steps, cfg=cfg,
+        sampler_name=sampler_name, scheduler=scheduler,
+        unet_name=unet_name, lora_name=lora_name,
+        lora_strength=lora_strength, filename_prefix=filename_prefix,
+    )
+    async with session.post(
+        f"{COMFY_BASE}/prompt",
+        json={"prompt": workflow, "client_id": client_id},
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as resp:
+        data = await resp.json(content_type=None)
+
+    if "prompt_id" not in data:
+        err = data.get("error", {})
+        msg = err.get("details") or err.get("message", "validation error")
+        raise ValueError(f"Wan I2V ワークフロー検証エラー: {msg}")
+    return data["prompt_id"]
+
+
+async def check_wan_i2v_result(
+        prompt_id: str,
+        session: aiohttp.ClientSession) -> Optional[dict]:
+    """prompt_id の完了を一度だけ確認する。完了なら結果 dict、未完了なら None を返す。"""
+    try:
+        async with session.get(
+            f"{COMFY_BASE}/history/{prompt_id}",
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            hist = await resp.json(content_type=None)
+    except Exception:
+        return None
+
+    if prompt_id not in hist:
+        return None
+    entry = hist[prompt_id]
+    status = entry.get("status", {})
+    if status.get("status_str") == "error":
+        msgs = status.get("messages", [])
+        raise RuntimeError(f"Wan I2V ComfyUI エラー: {msgs}")
+    outputs = entry.get("outputs", {})
+    if "13" in outputs:
+        imgs = outputs["13"].get("images", [])
+        if imgs:
+            img = imgs[0]
+            return {
+                "filename": img["filename"],
+                "subfolder": img.get("subfolder", "wan_i2v"),
+                "type":     img.get("type", "output"),
+            }
+    return None
+
+
+# ──── 送信 & ポーリング（後方互換） ─────────────────────────────────────
 
 async def submit_wan_i2v_async(
         positive: str,

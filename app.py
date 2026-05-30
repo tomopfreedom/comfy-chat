@@ -23,6 +23,8 @@ from comfy_utils import (
 )
 from wan_utils import (
     submit_wan_i2v_async,
+    queue_wan_i2v_async,
+    check_wan_i2v_result,
     WAN_MODEL_A14B, WAN_MODEL_A14B_LOW, WAN_ANIME_LORA,
 )
 from wm_utils import (
@@ -54,6 +56,54 @@ async def _restart_llama_server(session: aiohttp.ClientSession) -> None:
                     return
         except Exception:
             pass
+
+# ──── ComfyUI ログ進捗パーサー ────────────────────────────────────────────────
+COMFYUI_LOG = "/tmp/comfyui.log"
+
+def _parse_comfyui_progress() -> dict:
+    """ComfyUI ログの末尾をパースして Wan2.2 I2V の進捗を返す。
+
+    Returns:
+        {stage, step, total_steps, percent, eta_seconds, sec_per_step}
+        stage: 1=HighNoise処理中, 2=LowNoise処理中, 0=不明
+    """
+    import re
+    try:
+        with open(COMFYUI_LOG, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 5000))
+            tail = f.read().decode("utf-8", errors="ignore")
+
+        # "Requested to load WAN21" の出現回数でステージを判定
+        stage = tail.count("Requested to load WAN21")
+
+        # "70%|███ | 7/10 [23:01<09:51, 197.14s/it]" 形式をパース
+        matches = re.findall(
+            r'(\d+)%\|[^|]*\|\s*(\d+)/(\d+)\s+\[[\d:]+<([\d:]+),\s*([\d.]+)s/it\]',
+            tail,
+        )
+        if matches:
+            pct, cur, total, eta_str, spit = matches[-1]
+            parts = eta_str.split(":")
+            if len(parts) == 2:
+                eta_sec = int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                eta_sec = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            else:
+                eta_sec = 0
+            return {
+                "stage":        max(1, stage),
+                "step":         int(cur),
+                "total_steps":  int(total),
+                "percent":      int(pct),
+                "eta_seconds":  eta_sec,
+                "sec_per_step": float(spit),
+            }
+    except Exception:
+        pass
+    return {"stage": 0, "step": 0, "total_steps": 0, "percent": 0, "eta_seconds": 0, "sec_per_step": 0}
+
 
 # ──── ComfyUI 管理 ─────────────────────────────────────────────────────────
 COMFYUI_START_SCRIPT = os.path.expanduser("~/infra/start-comfyui.sh")
@@ -638,11 +688,10 @@ async def handle_wan_i2v(request):
     # VRAM を確保するために llama-server を停止
     _stop_llama_server()
 
-    result = None
     try:
         # 絶対パスの場合は ComfyUI にアップロードしてファイル名を取得
         comfy_image_name = await _upload_image_to_comfy(session, init_image)
-        result = await submit_wan_i2v_async(
+        prompt_id = await queue_wan_i2v_async(
             positive=positive,
             negative=negative,
             seed=seed,
@@ -659,24 +708,69 @@ async def handle_wan_i2v(request):
             lora_strength=lora_strength,
         )
     except Exception as e:
-        return web.json_response({"ok": False, "error": f"Wan I2V エラー: {e}"})
-    finally:
-        # 生成完了・エラー問わず llama-server をバックグラウンドで再起動
         asyncio.create_task(_restart_llama_server(session))
+        return web.json_response({"ok": False, "error": f"Wan I2V エラー: {e}"})
 
-    if result is None:
-        return web.json_response({"ok": False, "error": "Wan I2V (A14B) タイムアウト（2400秒経過）"})
-
-    fn = result.get("filename", "")
-    sf = result.get("subfolder", "")
-    ty = result.get("type", "output")
+    # prompt_id を返してフロントエンドにポーリングさせる
     return web.json_response({
         "ok":        True,
+        "prompt_id": prompt_id,
         "positive":  positive,
         "seed":      seed,
-        "image_url": f"/api/image?filename={fn}&subfolder={sf}&type={ty}",
-        "filename":  fn,
     })
+
+
+async def handle_wan_i2v_progress(request):
+    """Wan I2V の進捗確認エンドポイント。完了時は llama-server を再起動する。
+
+    Response:
+      running: {status:"running", stage, step, total_steps, percent, eta_seconds}
+      done:    {status:"done", image_url, filename}
+      error:   {status:"error", error}
+    """
+    prompt_id = request.match_info["prompt_id"]
+    session   = request.app["session"]
+    completed = request.app.setdefault("wan_completed", set())
+
+    # 完了済みキャッシュ（重複再起動防止）
+    if prompt_id in completed:
+        # 既完了: history から結果を取得して返す
+        try:
+            result = await check_wan_i2v_result(prompt_id, session)
+        except RuntimeError as e:
+            return web.json_response({"status": "error", "error": str(e)})
+        if result:
+            fn = result["filename"]
+            sf = result.get("subfolder", "wan_i2v")
+            ty = result.get("type", "output")
+            return web.json_response({
+                "status":    "done",
+                "image_url": f"/api/image?filename={fn}&subfolder={sf}&type={ty}",
+                "filename":  fn,
+            })
+
+    # 完了チェック
+    try:
+        result = await check_wan_i2v_result(prompt_id, session)
+    except RuntimeError as e:
+        asyncio.create_task(_restart_llama_server(session))
+        return web.json_response({"status": "error", "error": str(e)})
+
+    if result:
+        completed.add(prompt_id)
+        asyncio.create_task(_restart_llama_server(session))
+        fn = result["filename"]
+        sf = result.get("subfolder", "wan_i2v")
+        ty = result.get("type", "output")
+        return web.json_response({
+            "status":    "done",
+            "image_url": f"/api/image?filename={fn}&subfolder={sf}&type={ty}",
+            "filename":  fn,
+        })
+
+    # 実行中: ログから進捗をパース
+    prog = _parse_comfyui_progress()
+    return web.json_response({"status": "running", **prog})
 
 
 async def handle_upload(request):
@@ -1131,7 +1225,8 @@ def main():
     app.router.add_post("/api/explain-tags",       handle_explain_tags)
     app.router.add_post("/api/translate",         handle_translate)
     app.router.add_post("/api/generate",         handle_generate)
-    app.router.add_post("/api/wan-i2v",           handle_wan_i2v)
+    app.router.add_post("/api/wan-i2v",                    handle_wan_i2v)
+    app.router.add_get("/api/wan-i2v/progress/{prompt_id}", handle_wan_i2v_progress)
     app.router.add_post("/api/upload",           handle_upload)
     app.router.add_get("/api/image",             handle_image)
     app.router.add_post("/api/review",           handle_review)
