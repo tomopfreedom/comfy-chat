@@ -4240,8 +4240,8 @@
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
-        if (!data.name) throw new Error("アップロードレスポンスにファイル名がありません");  // [LOW]
-        vgUploadedName = data.name;
+        if (!data.filename) throw new Error("アップロードレスポンスにファイル名がありません");
+        vgUploadedName = data.filename;
         genBtn.textContent = "🎬 動画を生成";
         genBtn.disabled = false;
       } catch (err) {
