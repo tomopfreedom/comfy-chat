@@ -10,6 +10,7 @@ Wan2.1-I2V-14B-480P + NVFP4 4ステップ蒸留モデルを使って
 import asyncio
 import os
 import sys
+import threading
 import uuid
 from typing import Optional
 
@@ -28,8 +29,9 @@ if _LIGHTX2V_DIR not in sys.path:
 
 # ──── モデルキャッシュ ───────────────────────────────────────────────────────
 
-_pipeline = None  # LightX2VPipeline のシングルトン
+_pipeline = None        # LightX2VPipeline のシングルトン
 _pipeline_frames = None  # 現在のジェネレーターのフレーム数
+_pipeline_lock = threading.Lock()  # 2重ロード・concurrent generate 防止
 
 
 def is_available() -> bool:
@@ -48,43 +50,45 @@ def is_available() -> bool:
 def _load_pipeline(frames: int = 81):
     """LightX2VPipeline をロードしてキャッシュする。
     フレーム数が変わった場合はジェネレーターのみ再作成する。
+    Lock で2重ロードと concurrent generate/create_generator を防止する。
     """
     global _pipeline, _pipeline_frames
     from lightx2v import LightX2VPipeline
 
-    if _pipeline is None:
-        pipe = LightX2VPipeline(
-            model_path=LIGHTX2V_BASE_MODEL,
-            model_cls="wan2.1_distill",  # 4ステップ蒸留モデル
-            task="i2v",
-        )
-        pipe.enable_offload(
-            cpu_offload=True,
-            offload_granularity="block",
-            text_encoder_offload=True,
-            image_encoder_offload=False,
-            vae_offload=False,
-        )
-        pipe.enable_quantize(
-            dit_quantized=True,
-            dit_quantized_ckpt=LIGHTX2V_NVFP4_CKPT,
-            quant_scheme="nvfp4",
-        )
-        _pipeline = pipe
+    with _pipeline_lock:
+        if _pipeline is None:
+            pipe = LightX2VPipeline(
+                model_path=LIGHTX2V_BASE_MODEL,
+                model_cls="wan2.1_distill",  # 4ステップ蒸留モデル
+                task="i2v",
+            )
+            pipe.enable_offload(
+                cpu_offload=True,
+                offload_granularity="block",
+                text_encoder_offload=True,
+                image_encoder_offload=False,
+                vae_offload=False,
+            )
+            pipe.enable_quantize(
+                dit_quantized=True,
+                dit_quantized_ckpt=LIGHTX2V_NVFP4_CKPT,
+                quant_scheme="nvfp4",
+            )
+            _pipeline = pipe
 
-    if _pipeline_frames != frames:
-        _pipeline.create_generator(
-            attn_mode="sage_attn2",
-            infer_steps=4,       # NVFP4 4ステップ蒸留
-            height=480,
-            width=832,
-            num_frames=frames,
-            guidance_scale=1.0,  # Wan2.1 蒸留モデル推奨値
-            sample_shift=5.0,
-        )
-        _pipeline_frames = frames
+        if _pipeline_frames != frames:
+            _pipeline.create_generator(
+                attn_mode="sage_attn2",
+                infer_steps=4,       # NVFP4 4ステップ蒸留
+                height=480,
+                width=832,
+                num_frames=frames,
+                guidance_scale=1.0,  # Wan2.1 蒸留モデル推奨値
+                sample_shift=5.0,
+            )
+            _pipeline_frames = frames
 
-    return _pipeline
+        return _pipeline
 
 
 def _generate_sync(

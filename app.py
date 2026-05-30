@@ -108,6 +108,7 @@ def _parse_comfyui_progress() -> dict:
 
 # ──── ComfyUI 管理 ─────────────────────────────────────────────────────────
 COMFYUI_START_SCRIPT = os.path.expanduser("~/infra/start-comfyui.sh")
+COMFY_INPUT_DIR      = os.path.expanduser("~/infra/comfyui/input")
 
 def _stop_comfyui() -> None:
     """ComfyUI を停止する。"""
@@ -810,8 +811,7 @@ async def handle_lightx2v_i2v(request):
 
     try:
         # ComfyUI input/ にアップロードされたファイル名からローカルパスを解決
-        comfy_input_dir = os.path.expanduser("~/infra/comfyui/input")
-        image_path = os.path.join(comfy_input_dir, init_image)
+        image_path = os.path.join(COMFY_INPUT_DIR, init_image)
         if not os.path.isfile(image_path):
             # フルパスとして渡された場合
             image_path = init_image
@@ -825,9 +825,9 @@ async def handle_lightx2v_i2v(request):
             fps=fps,
         )
     except Exception as e:
-        asyncio.create_task(_restart_llama_server(session))
         return web.json_response({"ok": False, "error": f"LightX2V エラー: {e}"})
     finally:
+        # 成功・エラー問わず llama-server をバックグラウンドで再起動（1回のみ）
         asyncio.create_task(_restart_llama_server(session))
 
     out_path = result["path"]
@@ -847,8 +847,8 @@ async def handle_lightx2v_video(request):
     if not path or not os.path.isfile(path):
         return web.Response(status=404, text="File not found")
     # パストラバーサル防止: 許可ディレクトリ内かチェック
-    allowed_dir = os.path.expanduser("~/infra/comfyui/output/lightx2v")
-    if not os.path.abspath(path).startswith(os.path.abspath(allowed_dir)):
+    allowed_dir = os.path.abspath(os.path.expanduser("~/infra/comfyui/output/lightx2v"))
+    if not os.path.abspath(path).startswith(allowed_dir + os.sep):
         return web.Response(status=403, text="Forbidden")
     return web.FileResponse(path)
 
