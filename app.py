@@ -55,6 +55,29 @@ async def _restart_llama_server(session: aiohttp.ClientSession) -> None:
         except Exception:
             pass
 
+# ──── ComfyUI 管理 ─────────────────────────────────────────────────────────
+COMFYUI_START_SCRIPT = os.path.expanduser("~/infra/start-comfyui.sh")
+
+def _stop_comfyui() -> None:
+    """ComfyUI を停止する。"""
+    subprocess.run(["pkill", "-f", "python main.py"], check=False)
+    time.sleep(2)
+
+async def _restart_comfyui(session: aiohttp.ClientSession) -> None:
+    """ComfyUI を再起動し、/system_stats が応答するまで最大120秒待機する。"""
+    subprocess.Popen(["bash", COMFYUI_START_SCRIPT])
+    deadline = asyncio.get_event_loop().time() + 120
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(3)
+        try:
+            async with session.get(
+                f"{COMFY_BASE}/system_stats", timeout=aiohttp.ClientTimeout(total=3)
+            ) as r:
+                await r.read()
+                return
+        except Exception:
+            pass
+
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 LORA_REGISTRY_FILE = pathlib.Path(__file__).parent / "loras.json"
 
@@ -775,6 +798,19 @@ async def handle_llm_start(request):
     return web.json_response({"ok": True, "message": "llama-server を起動中..."})
 
 
+async def handle_comfyui_stop(request):
+    """ComfyUI を停止する（UI ボタン用）。"""
+    _stop_comfyui()
+    return web.json_response({"ok": True, "message": "ComfyUI を停止しました"})
+
+
+async def handle_comfyui_start(request):
+    """ComfyUI を起動する（UI ボタン用）。バックグラウンドで起動して即レスポンス。"""
+    session = request.app["session"]
+    asyncio.create_task(_restart_comfyui(session))
+    return web.json_response({"ok": True, "message": "ComfyUI を起動中..."})
+
+
 async def handle_negative_presets(request: web.Request) -> web.Response:
     return web.json_response(list(NEGATIVE_PRESETS.keys()))
 
@@ -1100,8 +1136,10 @@ def main():
     app.router.add_get("/api/image",             handle_image)
     app.router.add_post("/api/review",           handle_review)
     app.router.add_get("/api/health",            handle_health)
-    app.router.add_post("/api/llm/stop",         handle_llm_stop)
-    app.router.add_post("/api/llm/start",        handle_llm_start)
+    app.router.add_post("/api/llm/stop",          handle_llm_stop)
+    app.router.add_post("/api/llm/start",         handle_llm_start)
+    app.router.add_post("/api/comfyui/stop",      handle_comfyui_stop)
+    app.router.add_post("/api/comfyui/start",     handle_comfyui_start)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
     app.router.add_get("/api/civitai/model",     handle_civitai_model)
