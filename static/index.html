@@ -1503,6 +1503,7 @@
   <a href="#generate"    class="tab active">🎨 生成</a>
   <a href="#loras"       class="tab">🧩 LoRA 管理</a>
   <a href="#history"     class="tab">📷 履歴</a>
+  <a href="#video-gen"   class="tab">🎬 動画生成</a>
   <a href="#video-edit"  class="tab">🎞️ 動画編集</a>
 </nav>
 
@@ -1789,6 +1790,77 @@
       <button id="history-clear-btn">全て削除</button>
     </div>
     <div id="history-grid"></div>
+  </div>
+</div>
+
+<!-- ── 動画生成ページ ─────────────────────────────── -->
+<div id="page-video-gen" class="page">
+  <div style="max-width:640px; margin:0 auto; padding:16px;">
+    <h2>🎬 動画生成（Wan2.2 I2V）</h2>
+
+    <!-- 参照画像 -->
+    <div class="form-group" style="margin-bottom:16px;">
+      <label style="font-weight:bold; display:block; margin-bottom:6px;">参照画像</label>
+      <div id="vg-drop-zone" style="cursor:pointer; border:2px dashed #aaa; border-radius:8px; padding:24px; text-align:center; color:#888; transition:background .2s;">
+        クリックまたはドラッグ&amp;ドロップで参照画像を選択
+        <input type="file" id="vg-file-input" accept="image/*" style="display:none">
+      </div>
+      <img id="vg-preview" style="max-width:200px; margin-top:8px; border-radius:6px; display:none;">
+    </div>
+
+    <!-- プロンプト -->
+    <div class="form-group" style="margin-bottom:12px;">
+      <label style="font-weight:bold; display:block; margin-bottom:4px;">プロンプト（英語）</label>
+      <textarea id="vg-prompt" rows="3" style="width:100%; box-sizing:border-box;"
+        placeholder="tomopi smiling, waving hand, room background"></textarea>
+    </div>
+
+    <!-- ネガティブプロンプト -->
+    <div class="form-group" style="margin-bottom:12px;">
+      <label style="font-weight:bold; display:block; margin-bottom:4px;">ネガティブプロンプト</label>
+      <textarea id="vg-negative" rows="2" style="width:100%; box-sizing:border-box;">blurry, worst quality, low quality, distorted face</textarea>
+    </div>
+
+    <!-- 詳細オプション -->
+    <details style="margin-bottom:16px; border:1px solid #ddd; border-radius:6px; padding:8px;">
+      <summary style="cursor:pointer; font-weight:bold; padding:4px;">⚙️ 詳細オプション</summary>
+      <div style="margin-top:12px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <label style="grid-column:1/-1; display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="vg-use-lora" checked> アニメスタイル LoRA（推奨）
+        </label>
+        <label>フレーム数<br><input type="number" id="vg-frames" value="81" min="8" max="200" style="width:100%;"></label>
+        <label>FPS<br><input type="number" id="vg-fps" value="16" min="8" max="30" style="width:100%;"></label>
+        <label>幅<br><input type="number" id="vg-width" value="576" step="64" style="width:100%;"></label>
+        <label>高さ<br><input type="number" id="vg-height" value="1024" step="64" style="width:100%;"></label>
+        <label>Steps<br><input type="number" id="vg-steps" value="20" min="5" max="50" style="width:100%;"></label>
+        <label>CFG<br><input type="number" id="vg-cfg" value="3.5" min="1" max="10" step="0.5" style="width:100%;"></label>
+        <label style="grid-column:1/-1;">Seed（-1 でランダム）<br><input type="number" id="vg-seed" value="-1" style="width:100%;"></label>
+      </div>
+    </details>
+
+    <!-- 生成ボタン -->
+    <button id="vg-generate-btn" disabled
+      style="width:100%; padding:12px; font-size:1rem; border-radius:6px; cursor:pointer;">
+      生成（参照画像を選択してください）
+    </button>
+
+    <!-- 進捗 -->
+    <div id="vg-progress" style="display:none; margin-top:16px; text-align:center;">
+      <p id="vg-status-text" style="margin-bottom:8px;">⏳ Wan2.2 I2V 処理中... 最大20分程度かかります</p>
+      <progress style="width:100%;"></progress>
+    </div>
+
+    <!-- エラー -->
+    <div id="vg-error" style="display:none; color:#c00; margin-top:12px; padding:8px; background:#fee; border-radius:4px;"></div>
+
+    <!-- 結果 -->
+    <div id="vg-result" style="display:none; margin-top:20px;">
+      <h3>生成結果</h3>
+      <img id="vg-result-img" style="max-width:100%; border-radius:8px; display:block;">
+      <a id="vg-download-link" style="display:inline-block; margin-top:10px; padding:8px 16px; background:#333; color:#fff; border-radius:4px; text-decoration:none;">
+        ⬇️ ダウンロード (.webp)
+      </a>
+    </div>
   </div>
 </div>
 
@@ -4119,6 +4191,148 @@
 
       await runProcess(videoFile, "clean.mp4");
     });
+  })();
+
+  // ───── 動画生成 (Wan2.2 I2V) ──────────────────────────────────────────────
+  (function () {
+    let vgUploadedName = null;
+    let vgGenerating   = false;  // [HIGH] 生成中フラグ — ファイル差し替えによる重複送信を防ぐ
+
+    const dropZone   = $("vg-drop-zone");
+    const fileInput  = $("vg-file-input");
+    const preview    = $("vg-preview");
+    const genBtn     = $("vg-generate-btn");
+    const progressEl = $("vg-progress");
+    const errorDiv   = $("vg-error");
+    const resultDiv  = $("vg-result");
+    const resultImg  = $("vg-result-img");
+    const dlLink     = $("vg-download-link");
+
+    // ── ファイル選択（クリック・ドロップ）──────────────────────────────────
+    dropZone.addEventListener("click", () => { if (!vgGenerating) fileInput.click(); });
+    dropZone.addEventListener("dragover", e => {
+      e.preventDefault();
+      if (!vgGenerating) dropZone.style.background = "#eef";
+    });
+    dropZone.addEventListener("dragleave", () => {
+      dropZone.style.background = "";
+    });
+    dropZone.addEventListener("drop", e => {
+      e.preventDefault();
+      dropZone.style.background = "";
+      if (!vgGenerating && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", () => {
+      if (!vgGenerating && fileInput.files[0]) handleFile(fileInput.files[0]);
+    });
+
+    async function handleFile(file) {
+      if (vgGenerating) return;  // [HIGH] 生成中は差し替え不可
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = "block";
+      genBtn.textContent = "アップロード中...";
+      genBtn.disabled = true;
+      errorDiv.style.display = "none";
+
+      try {
+        const fd = new FormData();
+        fd.append("image", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        if (!data.name) throw new Error("アップロードレスポンスにファイル名がありません");  // [LOW]
+        vgUploadedName = data.name;
+        genBtn.textContent = "🎬 動画を生成";
+        genBtn.disabled = false;
+      } catch (err) {
+        showVgError("画像アップロード失敗: " + err.message);
+        genBtn.textContent = "生成（参照画像を選択してください）";
+        genBtn.disabled = true;
+      }
+    }
+
+    // ── 生成 ──────────────────────────────────────────────────────────────
+    genBtn.addEventListener("click", async () => {
+      if (!vgUploadedName) {
+        showVgError("参照画像を選択してください。");  // [LOW] 黙って return しない
+        return;
+      }
+
+      const prompt = $("vg-prompt").value.trim();
+      if (!prompt) {
+        showVgError("プロンプトを入力してください。");
+        return;
+      }
+
+      setVgGenerating(true);
+      errorDiv.style.display = "none";
+      resultDiv.style.display = "none";
+
+      const payload = {
+        init_image:     vgUploadedName,
+        message:        prompt,
+        negative:       $("vg-negative").value.trim(),
+        use_anime_lora: $("vg-use-lora").checked,
+        lora_strength:  1.0,
+        width:          parseInt($("vg-width").value)   || 576,
+        height:         parseInt($("vg-height").value)  || 1024,
+        frames:         parseInt($("vg-frames").value)  || 81,
+        fps:            parseInt($("vg-fps").value)     || 16,
+        steps:          parseInt($("vg-steps").value)   || 20,
+        cfg:            parseFloat($("vg-cfg").value)   || 3.5,
+        seed:           parseInt($("vg-seed").value),
+      };
+
+      // [MEDIUM] サーバー側 1200秒 より余裕をもって 60秒 長い 1260秒 で制限
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 1260 * 1000);
+
+      try {
+        const res = await fetch("/api/wan-i2v", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+          signal:  controller.signal,
+        });
+        clearTimeout(tid);
+
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "生成に失敗しました");
+        if (!data.image_url) throw new Error("生成結果URLがありません");  // [LOW]
+
+        showVgResult(data.image_url);
+      } catch (err) {
+        clearTimeout(tid);
+        const msg = err.name === "AbortError"
+          ? "タイムアウト — ComfyUI の状態を確認してください"
+          : "生成エラー: " + err.message;
+        showVgError(msg);
+      } finally {
+        setVgGenerating(false);
+      }
+    });
+
+    function showVgResult(imageUrl) {
+      resultImg.src = imageUrl;
+      dlLink.href = imageUrl;
+      dlLink.download = "wan_i2v_result.webp";
+      resultDiv.style.display = "block";
+    }
+
+    function showVgError(msg) {
+      errorDiv.textContent = msg;
+      errorDiv.style.display = "block";
+    }
+
+    function setVgGenerating(on) {
+      vgGenerating              = on;  // [HIGH] フラグ更新
+      progressEl.style.display  = on ? "block" : "none";
+      genBtn.disabled            = on || !vgUploadedName;
+      genBtn.textContent         = on
+        ? "⏳ 生成中（しばらくお待ちください）..."
+        : "🎬 動画を生成";
+    }
   })();
 
 </script>

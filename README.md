@@ -32,6 +32,7 @@
 - **ControlNet（編集タブ）** — 参照画像でポーズ・ラインアートを制御。openpose（DWPreprocessor で骨格抽出）と canny（エッジ抽出）に対応。強度スライダーで適用量を調整
 - **IP-Adapter（編集タブ）** — 参照画像のスタイル・雰囲気を生成画像に転写（PLUS high strength モード）。img2img より自然な転写が可能
 - **ウォーターマーク除去（動画編集タブ）** — 動画から固定位置のウォーターマークを除去して MP4 を出力。2 方式を選択可能：**標準**（cv2 TELEA、高速・数秒）・**AI**（ComfyUI SDXL インペイント、高品質・数十秒）。プレビュー画像をドラッグして除去範囲を視覚的に指定でき、音声保持オプション・繰り返しインペイント対応
+- **動画生成（動画生成タブ）** — 参照画像 + テキストプロンプトから Wan2.2 I2V A14B（2段カスケード）でアニメーション WebP を生成。フレーム数・FPS・解像度・Steps・CFG・seed を調整可能。アニメスタイル LoRA（`wan2.2_i2v_animestyle_v2_low`）を ON/OFF 選択。生成結果をブラウザで即時再生 + ダウンロード
 
 ## 依存サービス
 
@@ -44,6 +45,17 @@
 ComfyUI の Python venv（`~/infra/comfyui/venv/`）を使用するため、追加インストール不要。
 
 Vision LLM（port 11435）は AI レビューボタンを押したときに `~/infra/start-llama-vision.sh` で自動起動する。9B モデルを一時停止して起動するため、レビュー中は画像生成が待機状態になる。
+
+### Wan2.2 I2V 動画生成に必要なモデル
+
+```
+~/infra/comfyui/models/
+├── unet/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf   # Stage 1（粗生成）
+├── unet/LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf     # Stage 2（精細化）
+├── vae/wan_2.1_vae.safetensors                             # 16ch VAE（48ch は不可）
+├── text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors   # テキストエンコーダー
+└── loras/wan2.2_i2v_animestyle_v2_low.safetensors          # アニメスタイル LoRA
+```
 
 ### ComfyUI カスタムノード
 
@@ -109,13 +121,14 @@ llama-server（mymodel-9b-unc）と ComfyUI が未起動の場合、自動で起
 
 ## 画面構成
 
-UI は 4 つのタブに分かれている。
+UI は 5 つのタブに分かれている。
 
 | タブ | 内容 |
 |------|------|
 | 🎨 生成 | 画像生成チャット（メイン機能） |
 | 🧩 LoRA 管理 | LoRA の登録・編集・削除・Civitai 検索 |
 | 📷 履歴 | 過去の生成画像ギャラリー |
+| 🎬 動画生成 | Wan2.2 I2V による動画生成 |
 | 🎞️ 動画編集 | 動画ウォーターマーク除去 |
 
 ## 使い方
@@ -208,6 +221,25 @@ UI は 4 つのタブに分かれている。
 5. レビュー内容に誤りがある場合は下部の入力欄に反論・補足を入力して送信 — Vision LLM が評価を更新する
 
 > Vision レビュー中は 9B LLM が停止するため、チャット入力からの新規生成はレビュー完了後に行うこと。
+
+### 動画生成（Wan2.2 I2V）
+
+1. 「🎬 動画生成」タブを開く
+2. 参照画像をドラッグ&ドロップまたはクリックしてアップロード（PNG / JPEG）
+3. **プロンプト**に英語でモーション説明を入力（例: `tomopi smiling, waving hand, room background`）
+4. 必要に応じて **ネガティブプロンプト**・**詳細オプション**（フレーム数・FPS・解像度・Steps・CFG・seed）を調整
+5. 「🎬 動画を生成」ボタンをクリック（処理時間: 最大 20 分程度）
+6. 完了後にアニメーション WebP がブラウザ内で自動再生される
+7. 「⬇️ ダウンロード」リンクで `.webp` ファイルを保存
+
+| オプション | デフォルト | 説明 |
+|-----------|-----------|------|
+| アニメスタイル LoRA | ON | `wan2.2_i2v_animestyle_v2_low` を適用してアニメ風に最適化 |
+| フレーム数 | 81 | 約5秒 @ 16fps |
+| 幅 × 高さ | 576 × 1024 | 縦型（9:16）。横型にする場合は 1024 × 576 |
+| CFG | 3.5 | Wan2.2 推奨値（画像生成より低め） |
+
+> **要件**: ComfyUI が起動済みであること（`~/infra/start-comfyui.sh`）。Wan2.2 I2V A14B GGUF モデルが `~/infra/comfyui/models/unet/` に配置済みであること。
 
 ### ウォーターマーク除去（動画編集）
 
@@ -322,7 +354,7 @@ comfy-chat/
 ├── wm_comfy.py       # ウォーターマーク除去（ComfyUI AI インペイント）
 ├── loras.json        # LoRA レジストリ（自動生成・更新）
 ├── static/
-│   ├── index.html    # シングルファイル Web UI（4タブ構成）
+│   ├── index.html    # シングルファイル Web UI（5タブ構成）
 │   └── tags.json     # Danbooru タグ補完データ（6,947件・日本語訳付き）
 ├── tools/
 │   ├── build_tags_json.py      # tags.json 生成スクリプト（WD14 CSV → JSON 変換）
@@ -423,6 +455,7 @@ nArnima Turbo 等のマージ済みチェックポイント（名前に `anima` 
 | `GET` | `/api/civitai/search` | Civitai LoRA 検索（`query`, `limit`, `domain`, `tag` パラメータ） |
 | `GET` | `/api/civitai/model` | Civitai 単一モデル情報取得（`id`, `domain` パラメータ） |
 | `POST` | `/api/civitai/download` | Civitai LoRA ダウンロード＆自動登録 |
+| `POST` | `/api/wan-i2v` | 参照画像 + プロンプトから Wan2.2 I2V で動画生成（アニメーション WebP を返す） |
 | `POST` | `/api/wm/preview` | 動画の最初のフレームを JPEG で返す（除去範囲確認用） |
 | `POST` | `/api/wm/process` | ウォーターマーク除去処理（`method=telea\|comfy`, `x1/y1/x2/y2`, `keep_audio`） |
 
