@@ -1494,6 +1494,10 @@
 
   <div id="health">
     <div class="hdot"><div class="dot" id="dot-llm"></div><span>LLM</span></div>
+    <button id="llm-stop-btn"  title="Qwen3.5-9B-unc を停止（動画生成前に VRAM 確保）"
+      style="font-size:0.65rem; padding:2px 6px; cursor:pointer; border-radius:3px;">⏹</button>
+    <button id="llm-start-btn" title="Qwen3.5-9B-unc を起動"
+      style="font-size:0.65rem; padding:2px 6px; cursor:pointer; border-radius:3px;">▶</button>
     <div class="hdot"><div class="dot" id="dot-comfy"></div><span>ComfyUI</span></div>
   </div>
 </header>
@@ -1846,7 +1850,7 @@
 
     <!-- 進捗 -->
     <div id="vg-progress" style="display:none; margin-top:16px; text-align:center;">
-      <p id="vg-status-text" style="margin-bottom:8px;">⏳ Wan2.2 I2V 処理中... 最大20分程度かかります</p>
+      <p id="vg-status-text" style="margin-bottom:8px;">⏳ LLM を停止して Wan2.2 I2V 処理中... 最大40分程度かかります（LLM は生成完了後に自動再起動）</p>
       <progress style="width:100%;"></progress>
     </div>
 
@@ -2006,6 +2010,38 @@
   }
   checkHealth();
   setInterval(checkHealth, 15000);
+
+  // ── LLM 起動/停止ボタン ────────────────────────────────────────────────
+  $("llm-stop-btn").addEventListener("click", async () => {
+    $("llm-stop-btn").disabled = true;
+    $("llm-stop-btn").textContent = "停止中...";
+    try {
+      await fetch("/api/llm/stop", { method: "POST" });
+      await checkHealth();
+    } finally {
+      $("llm-stop-btn").disabled = false;
+      $("llm-stop-btn").textContent = "⏹";
+    }
+  });
+
+  $("llm-start-btn").addEventListener("click", async () => {
+    $("llm-start-btn").disabled = true;
+    $("llm-start-btn").textContent = "起動中...";
+    try {
+      await fetch("/api/llm/start", { method: "POST" });
+      // 起動完了まで最大90秒ポーリング
+      const t0 = Date.now();
+      while (Date.now() - t0 < 90000) {
+        await new Promise(r => setTimeout(r, 3000));
+        const d = await fetch("/api/health").then(r => r.json()).catch(() => ({}));
+        if (d.llm) break;
+      }
+      await checkHealth();
+    } finally {
+      $("llm-start-btn").disabled = false;
+      $("llm-start-btn").textContent = "▶";
+    }
+  });
 
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {

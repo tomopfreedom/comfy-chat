@@ -8,6 +8,8 @@ import os
 import pathlib
 import random
 import re
+import subprocess
+import time
 import urllib.parse
 import uuid
 
@@ -27,6 +29,31 @@ from wm_utils import (
     get_first_frame_jpeg, remove_watermark_video, _validate_video,
 )
 from wm_comfy import remove_watermark_video_comfy
+
+# ──── llama-server 管理 ────────────────────────────────────────────────────
+LLAMA_HEALTH_URL  = "http://localhost:11434/health"
+LLAMA_START_SCRIPT = os.path.expanduser("~/infra/start-llama-9b-unc.sh")
+
+def _stop_llama_server() -> None:
+    """llama-server を停止して VRAM を解放する。"""
+    subprocess.run(["pkill", "-f", "llama-server"], check=False)
+    time.sleep(2)
+
+async def _restart_llama_server(session: aiohttp.ClientSession) -> None:
+    """llama-server を再起動し、/health が ok になるまで最大90秒待機する。"""
+    subprocess.Popen([LLAMA_START_SCRIPT])
+    deadline = asyncio.get_event_loop().time() + 90
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(3)
+        try:
+            async with session.get(
+                LLAMA_HEALTH_URL, timeout=aiohttp.ClientTimeout(total=3)
+            ) as r:
+                data = await r.json(content_type=None)
+                if data.get("status") == "ok":
+                    return
+        except Exception:
+            pass
 
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 LORA_REGISTRY_FILE = pathlib.Path(__file__).parent / "loras.json"
@@ -584,6 +611,11 @@ async def handle_wan_i2v(request):
         seed = random.randint(0, 2**32 - 1)
 
     session = request.app["session"]
+
+    # VRAM を確保するために llama-server を停止
+    _stop_llama_server()
+
+    result = None
     try:
         # 絶対パスの場合は ComfyUI にアップロードしてファイル名を取得
         comfy_image_name = await _upload_image_to_comfy(session, init_image)
@@ -605,10 +637,12 @@ async def handle_wan_i2v(request):
         )
     except Exception as e:
         return web.json_response({"ok": False, "error": f"Wan I2V エラー: {e}"})
+    finally:
+        # 生成完了・エラー問わず llama-server をバックグラウンドで再起動
+        asyncio.create_task(_restart_llama_server(session))
 
     if result is None:
-        model_label = "A14B"
-        return web.json_response({"ok": False, "error": f"Wan I2V ({model_label}) タイムアウト（1200秒経過）"})
+        return web.json_response({"ok": False, "error": "Wan I2V (A14B) タイムアウト（2400秒経過）"})
 
     fn = result.get("filename", "")
     sf = result.get("subfolder", "")
@@ -726,6 +760,19 @@ async def handle_health(request):
         pass
 
     return web.json_response(results)
+
+
+async def handle_llm_stop(request):
+    """llama-server を停止する（UI ボタン用）。"""
+    _stop_llama_server()
+    return web.json_response({"ok": True, "message": "llama-server を停止しました"})
+
+
+async def handle_llm_start(request):
+    """llama-server を起動する（UI ボタン用）。バックグラウンドで起動して即レスポンス。"""
+    session = request.app["session"]
+    asyncio.create_task(_restart_llama_server(session))
+    return web.json_response({"ok": True, "message": "llama-server を起動中..."})
 
 
 async def handle_negative_presets(request: web.Request) -> web.Response:
@@ -1053,6 +1100,8 @@ def main():
     app.router.add_get("/api/image",             handle_image)
     app.router.add_post("/api/review",           handle_review)
     app.router.add_get("/api/health",            handle_health)
+    app.router.add_post("/api/llm/stop",         handle_llm_stop)
+    app.router.add_post("/api/llm/start",        handle_llm_start)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
     app.router.add_get("/api/civitai/model",     handle_civitai_model)
