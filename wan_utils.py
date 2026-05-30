@@ -295,8 +295,8 @@ async def submit_wan_i2v_async(
     prompt_id = data["prompt_id"]
 
     # ポーリング: SaveAnimatedWEBP (ノード "13") の完了を検出
-    # A14B カスケードは2段なので20分タイムアウト
-    POLL_TIMEOUT_WAN = 1200  # 20 分
+    # A14B カスケードは2段。llama-server 同時起動時はVRAMオフロードで1ステップ約90秒かかるため40分に設定
+    POLL_TIMEOUT_WAN = 2400  # 40 分
     deadline = time.monotonic() + POLL_TIMEOUT_WAN
     while time.monotonic() < deadline:
         await asyncio.sleep(POLL_INTERVAL)

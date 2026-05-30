@@ -4283,9 +4283,9 @@
         seed:           parseInt($("vg-seed").value),
       };
 
-      // [MEDIUM] サーバー側 1200秒 より余裕をもって 60秒 長い 1260秒 で制限
+      // サーバー側 2400秒 より余裕をもって 60秒 長い 2460秒 で制限
       const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 1260 * 1000);
+      const tid = setTimeout(() => controller.abort(), 2460 * 1000);
 
       try {
         const res = await fetch("/api/wan-i2v", {
