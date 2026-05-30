@@ -27,6 +27,7 @@ from wan_utils import (
     check_wan_i2v_result,
     WAN_MODEL_A14B, WAN_MODEL_A14B_LOW, WAN_ANIME_LORA,
 )
+from lightx2v_utils import run_lightx2v_i2v, is_available as lightx2v_available
 from wm_utils import (
     get_first_frame_jpeg, remove_watermark_video, _validate_video,
 )
@@ -773,6 +774,85 @@ async def handle_wan_i2v_progress(request):
     return web.json_response({"status": "running", **prog})
 
 
+async def handle_lightx2v_i2v(request):
+    """LightX2V NVFP4 4ステップ蒸留モデルで動画生成（832×480 横長）。
+
+    リクエスト JSON: wan-i2v と同形式（init_image, message, negative, seed, frames, fps）
+    レスポンス: {"ok": true, "image_url": "/api/lightx2v-video?path=...", "filename": "..."}
+    """
+    if not lightx2v_available():
+        return web.json_response({
+            "ok": False,
+            "error": "LightX2V が未セットアップです。~/infra/setup_lightx2v.sh を実行してください。",
+        }, status=503)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    init_image = body.get("init_image", "").strip()
+    if not init_image:
+        return web.json_response({"ok": False, "error": "init_image が必要です"}, status=400)
+
+    positive = body.get("message", "").strip() or "anime girl, natural motion, high quality"
+    negative = body.get("negative", "")
+    frames   = int(body.get("frames", 81))
+    fps      = int(body.get("fps",    16))
+    seed     = int(body.get("seed",  -1))
+    if seed == -1:
+        seed = random.randint(0, 2**32 - 1)
+
+    session = request.app["session"]
+
+    # VRAM を確保するために llama-server を停止
+    _stop_llama_server()
+
+    try:
+        # ComfyUI input/ にアップロードされたファイル名からローカルパスを解決
+        comfy_input_dir = os.path.expanduser("~/infra/comfyui/input")
+        image_path = os.path.join(comfy_input_dir, init_image)
+        if not os.path.isfile(image_path):
+            # フルパスとして渡された場合
+            image_path = init_image
+
+        result = await run_lightx2v_i2v(
+            positive=positive,
+            negative=negative,
+            seed=seed,
+            image_path=image_path,
+            frames=frames,
+            fps=fps,
+        )
+    except Exception as e:
+        asyncio.create_task(_restart_llama_server(session))
+        return web.json_response({"ok": False, "error": f"LightX2V エラー: {e}"})
+    finally:
+        asyncio.create_task(_restart_llama_server(session))
+
+    out_path = result["path"]
+    filename = result["filename"]
+    return web.json_response({
+        "ok":        True,
+        "positive":  positive,
+        "seed":      seed,
+        "filename":  filename,
+        "image_url": f"/api/lightx2v-video?path={urllib.parse.quote(out_path)}",
+    })
+
+
+async def handle_lightx2v_video(request):
+    """LightX2V が生成した MP4 ファイルを返す。"""
+    path = request.rel_url.query.get("path", "")
+    if not path or not os.path.isfile(path):
+        return web.Response(status=404, text="File not found")
+    # パストラバーサル防止: 許可ディレクトリ内かチェック
+    allowed_dir = os.path.expanduser("~/infra/comfyui/output/lightx2v")
+    if not os.path.abspath(path).startswith(os.path.abspath(allowed_dir)):
+        return web.Response(status=403, text="Forbidden")
+    return web.FileResponse(path)
+
+
 async def handle_upload(request):
     """参照画像を ComfyUI の /upload/image に転送し、ファイル名を返す。"""
     try:
@@ -1235,6 +1315,8 @@ def main():
     app.router.add_post("/api/llm/start",         handle_llm_start)
     app.router.add_post("/api/comfyui/stop",      handle_comfyui_stop)
     app.router.add_post("/api/comfyui/start",     handle_comfyui_start)
+    app.router.add_post("/api/lightx2v-i2v",      handle_lightx2v_i2v)
+    app.router.add_get("/api/lightx2v-video",     handle_lightx2v_video)
     app.router.add_get("/api/negative-presets",  handle_negative_presets)
     app.router.add_get("/api/civitai/search",    handle_civitai_search)
     app.router.add_get("/api/civitai/model",     handle_civitai_model)

@@ -1846,6 +1846,22 @@
       </div>
     </details>
 
+    <!-- モデル選択 -->
+    <div style="margin-bottom:12px; padding:10px; background:#f5f5f5; border-radius:6px;">
+      <label style="font-weight:bold; display:block; margin-bottom:6px;">⚡ 生成モデル</label>
+      <label style="display:block; margin-bottom:4px; cursor:pointer;">
+        <input type="radio" name="vg-model" id="vg-model-wan" value="wan" checked>
+        <strong>Wan2.2 GGUF</strong>（高品質・縦長 576×1024・〜60分）
+      </label>
+      <label style="display:block; cursor:pointer;">
+        <input type="radio" name="vg-model" id="vg-model-lightx2v" value="lightx2v">
+        <strong>LightX2V NVFP4</strong>（高速・横長 832×480・数分）
+      </label>
+      <p id="vg-lightx2v-note" style="display:none; margin:6px 0 0; font-size:0.8rem; color:#886;">
+        ⚠ 横長（832×480）専用。参照画像も横長（832×480）で生成することを推奨。
+      </p>
+    </div>
+
     <!-- 生成ボタン -->
     <button id="vg-generate-btn" disabled
       style="width:100%; padding:12px; font-size:1rem; border-radius:6px; cursor:pointer;">
@@ -4324,8 +4340,21 @@
       }
     }
 
-    const progressText = $("vg-progress-text");
-    const progressBar  = $("vg-progress-bar");
+    const progressText  = $("vg-progress-text");
+    const progressBar   = $("vg-progress-bar");
+    const lightx2vNote  = $("vg-lightx2v-note");
+
+    // ── モデル選択ラジオの切り替え ────────────────────────────────────────
+    document.querySelectorAll('input[name="vg-model"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        lightx2vNote.style.display = radio.value === "lightx2v" ? "block" : "none";
+      });
+    });
+
+    function _selectedModel() {
+      const r = document.querySelector('input[name="vg-model"]:checked');
+      return r ? r.value : "wan";
+    }
 
     // ── 生成 ──────────────────────────────────────────────────────────────
     genBtn.addEventListener("click", async () => {
@@ -4361,43 +4390,59 @@
       };
 
       try {
-        // Step 1: キューに入れて prompt_id を受け取る（即レスポンス）
-        const initRes = await fetch("/api/wan-i2v", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!initRes.ok) throw new Error("HTTP " + initRes.status);
-        const initData = await initRes.json();
-        if (!initData.ok) throw new Error(initData.error || "送信に失敗しました");
-        const promptId = initData.prompt_id;
+        const model = _selectedModel();
 
-        // Step 2: 4秒ごとにポーリングして進捗表示
-        while (true) {
-          await new Promise(r => setTimeout(r, 4000));
-          const prog = await fetch(`/api/wan-i2v/progress/${promptId}`)
-            .then(r => r.json())
-            .catch(() => ({ status: "running", stage: 0, step: 0, total_steps: 0, eta_seconds: 0 }));
+        if (model === "lightx2v") {
+          // ── LightX2V NVFP4: 直接完了を待つ（ポーリング不要）──────────
+          progressText.textContent = "LightX2V NVFP4 処理中（数分）...";
+          const res = await fetch("/api/lightx2v-i2v", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "LightX2V エラー");
+          if (!data.image_url) throw new Error("生成結果URLがありません");
+          showVgResult(data.image_url);
 
-          if (prog.status === "done") {
-            if (!prog.image_url) throw new Error("生成結果URLがありません");
-            showVgResult(prog.image_url);
-            break;
+        } else {
+          // ── Wan2.2 GGUF: キューに入れてポーリング ────────────────────
+          const initRes = await fetch("/api/wan-i2v", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!initRes.ok) throw new Error("HTTP " + initRes.status);
+          const initData = await initRes.json();
+          if (!initData.ok) throw new Error(initData.error || "送信に失敗しました");
+          const promptId = initData.prompt_id;
+
+          while (true) {
+            await new Promise(r => setTimeout(r, 4000));
+            const prog = await fetch(`/api/wan-i2v/progress/${promptId}`)
+              .then(r => r.json())
+              .catch(() => ({ status: "running", stage: 0, step: 0, total_steps: 0, eta_seconds: 0 }));
+
+            if (prog.status === "done") {
+              if (!prog.image_url) throw new Error("生成結果URLがありません");
+              showVgResult(prog.image_url);
+              break;
+            }
+            if (prog.status === "error") throw new Error(prog.error || "ComfyUI エラー");
+
+            const stageLabel = prog.stage >= 2 ? "Stage 2/2（精細化）"
+                             : prog.stage === 1 ? "Stage 1/2（粗生成）"
+                             : "準備中...";
+            const stepInfo = prog.total_steps > 0 ? ` ${prog.step}/${prog.total_steps} ステップ` : "";
+            const etaStr   = prog.eta_seconds > 0  ? `  残り約 ${Math.ceil(prog.eta_seconds / 60)} 分` : "";
+            progressText.textContent = stageLabel + stepInfo + etaStr;
+            if (prog.total_steps > 0) {
+              const base = prog.stage >= 2 ? 50 : 0;
+              progressBar.value = base + (prog.step / prog.total_steps) * 50;
+            }
+            checkHealth();
           }
-          if (prog.status === "error") throw new Error(prog.error || "ComfyUI エラー");
-
-          // 進捗テキストとバーを更新
-          const stageLabel = prog.stage >= 2 ? "Stage 2/2（精細化）"
-                           : prog.stage === 1 ? "Stage 1/2（粗生成）"
-                           : "準備中...";
-          const stepInfo = prog.total_steps > 0 ? ` ${prog.step}/${prog.total_steps} ステップ` : "";
-          const etaStr   = prog.eta_seconds > 0  ? `  残り約 ${Math.ceil(prog.eta_seconds / 60)} 分` : "";
-          progressText.textContent = stageLabel + stepInfo + etaStr;
-          if (prog.total_steps > 0) {
-            const base = prog.stage >= 2 ? 50 : 0;
-            progressBar.value = base + (prog.step / prog.total_steps) * 50;
-          }
-          checkHealth();
         }
       } catch (err) {
         showVgError("生成エラー: " + err.message);
@@ -4409,9 +4454,30 @@
     });
 
     function showVgResult(imageUrl) {
-      resultImg.src = imageUrl;
-      dlLink.href = imageUrl;
-      dlLink.download = "wan_i2v_result.webp";
+      // MP4（LightX2V）は <video>、WebP（Wan2.2）は <img> で表示
+      if (imageUrl.includes("lightx2v-video")) {
+        resultImg.style.display = "none";
+        let vid = $("vg-result-video");
+        if (!vid) {
+          vid = document.createElement("video");
+          vid.id = "vg-result-video";
+          vid.controls = true;
+          vid.loop = true;
+          vid.style.cssText = "max-width:100%; border-radius:8px; display:block;";
+          resultImg.parentNode.insertBefore(vid, resultImg);
+        }
+        vid.src = imageUrl;
+        vid.style.display = "block";
+        dlLink.href = imageUrl;
+        dlLink.download = "lightx2v_result.mp4";
+      } else {
+        let vid = $("vg-result-video");
+        if (vid) vid.style.display = "none";
+        resultImg.src = imageUrl;
+        resultImg.style.display = "block";
+        dlLink.href = imageUrl;
+        dlLink.download = "wan_i2v_result.webp";
+      }
       resultDiv.style.display = "block";
     }
 
